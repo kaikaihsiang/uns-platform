@@ -1,0 +1,315 @@
+# =============================================================================
+# UNS Namespace 命名模板
+# =============================================================================
+# 基於 ISA-95 五層架構設計的 MQTT Topic Tree 標準範本。
+# 此檔案定義了一個虛擬工廠「台灣精密製造」的完整命名空間。
+#
+# 層級對應：
+#   Level 4 (企業層)   → enterprise
+#   Level 3 (廠區/區域) → site / area
+#   Level 2 (產線/單元) → line / cell
+#   Level 1 (設備/模組) → module / sensor
+# =============================================================================
+
+# --- 企業資訊 ---
+enterprise:
+  name: "台灣精密製造"
+  id: "TaiwanPrecision"
+  description: "台灣精密製造股份有限公司的 UNS 命名空間定義"
+
+# --- 廠區定義 ---
+sites:
+  # ========================
+  # 桃園廠
+  # ========================
+  - site_id: "Taoyuan"
+    display_name: "桃園廠"
+    description: "主要生產廠區，含 SMT 與組裝產線"
+    mqtt_prefix: "TaiwanPrecision/Taoyuan"
+    
+    areas:
+      # --- 表面黏著技術 (SMT) 區域 ---
+      - area_id: "SMT"
+        display_name: "SMT 車間"
+        description: "表面黏著技術產線區域"
+        
+        lines:
+          - line_id: "Line1"
+            display_name: "SMT 產線一"
+            
+            cells:
+              # 印刷機
+              - cell_id: "Printer"
+                display_name: "錫膏印刷機"
+                equipment_type: "solder_paste_printer"
+                
+                topics:
+                  # 遙測數據 (高頻率，每秒/每分鐘)
+                  - path: "TaiwanPrecision/Taoyuan/SMT/Line1/Printer/Telemetry/Temperature"
+                    description: "印刷頭溫度"
+                    payload_type: "json"
+                    frequency: "每 5 秒"
+                    qos: 0
+                    retain: false
+                    example_payload:
+                      value: 25.3
+                      unit: "°C"
+                      timestamp: "2024-01-15T08:30:00+08:00"
+
+                  - path: "TaiwanPrecision/Taoyuan/SMT/Line1/Printer/Telemetry/Pressure"
+                    description: "刮刀壓力"
+                    payload_type: "json"
+                    frequency: "每 5 秒"
+                    qos: 0
+                    retain: false
+                    example_payload:
+                      value: 5.2
+                      unit: "kg"
+                      timestamp: "2024-01-15T08:30:00+08:00"
+                  
+                  # 設備狀態 (低頻率，狀態變更時)
+                  - path: "TaiwanPrecision/Taoyuan/SMT/Line1/Printer/Status/MachineState"
+                    description: "設備運行狀態"
+                    payload_type: "json"
+                    frequency: "狀態變更時"
+                    qos: 1
+                    retain: true  # 狀態類 topic 必須 retain
+                    example_payload:
+                      state: "running"
+                      mode: "auto"
+                      operator_id: "OP-001"
+                      since: "2024-01-15T08:00:00+08:00"
+
+                  # 告警/事件 (不定期)
+                  - path: "TaiwanPrecision/Taoyuan/SMT/Line1/Printer/Alarm/ActiveAlarms"
+                    description: "當前有效告警"
+                    payload_type: "json"
+                    frequency: "事件觸發時"
+                    qos: 1  # 告警不可遺失
+                    retain: true
+                    example_payload:
+                      alarms:
+                        - code: "ALM-001"
+                          severity: "warning"
+                          message: "錫膏液位低於警戒值"
+                          triggered_at: "2024-01-15T09:15:00+08:00"
+                          state: "active"  # active / cleared（確認由 AMS 管理，不在 payload 中）
+
+                  # 指令 (下行控制) — 注意：實際架構中 Command 走 gRPC，此處僅為 topic 結構展示
+                  - path: "TaiwanPrecision/Taoyuan/SMT/Line1/Printer/Command/Control"
+                    description: "設備控制指令"
+                    payload_type: "json"
+                    frequency: "手動觸發"
+                    qos: 1
+                    retain: false  # 指令不應 retain
+                    example_payload:
+                      action: "pause"
+                      reason: "品質檢查"
+                      requested_by: "OP-001"
+                      request_id: "CMD-2024-0115-001"
+
+              # 貼片機
+              - cell_id: "PickAndPlace"
+                display_name: "貼片機"
+                equipment_type: "pick_and_place"
+                
+                topics:
+                  - path: "TaiwanPrecision/Taoyuan/SMT/Line1/PickAndPlace/Telemetry/PlacementRate"
+                    description: "貼片速率"
+                    payload_type: "json"
+                    frequency: "每 10 秒"
+                    qos: 0
+                    retain: false
+                    example_payload:
+                      value: 45000
+                      unit: "cph"  # components per hour
+                      timestamp: "2024-01-15T08:30:00+08:00"
+
+                  - path: "TaiwanPrecision/Taoyuan/SMT/Line1/PickAndPlace/Telemetry/FeederStatus"
+                    description: "供料器狀態總覽"
+                    payload_type: "json"
+                    frequency: "每 30 秒"
+                    qos: 1
+                    retain: true
+                    example_payload:
+                      feeders:
+                        - slot: 1
+                          part_number: "RC0402-100K"
+                          remaining_qty: 3500
+                          status: "ok"
+                        - slot: 2
+                          part_number: "CC0402-100N"
+                          remaining_qty: 120
+                          status: "low"
+
+              # 迴焊爐
+              - cell_id: "ReflowOven"
+                display_name: "迴焊爐"
+                equipment_type: "reflow_oven"
+                
+                topics:
+                  - path: "TaiwanPrecision/Taoyuan/SMT/Line1/ReflowOven/Telemetry/ZoneTemps"
+                    description: "各溫區即時溫度"
+                    payload_type: "json"
+                    frequency: "每 2 秒"
+                    qos: 0
+                    retain: false
+                    example_payload:
+                      zones:
+                        - zone: 1
+                          name: "預熱區"
+                          setpoint: 180
+                          actual: 179.5
+                          unit: "°C"
+                        - zone: 2
+                          name: "浸潤區"
+                          setpoint: 220
+                          actual: 219.8
+                          unit: "°C"
+                        - zone: 3
+                          name: "迴焊區"
+                          setpoint: 260
+                          actual: 260.2
+                          unit: "°C"
+                        - zone: 4
+                          name: "冷卻區"
+                          setpoint: 100
+                          actual: 102.1
+                          unit: "°C"
+                      conveyor_speed:
+                        value: 0.8
+                        unit: "m/min"
+
+      # --- 組裝區域 ---
+      - area_id: "Assembly"
+        display_name: "組裝車間"
+        description: "最終產品組裝區域"
+        
+        lines:
+          - line_id: "Line1"
+            display_name: "組裝產線一"
+            
+            cells:
+              - cell_id: "Robot1"
+                display_name: "六軸機器人"
+                equipment_type: "articulated_robot"
+                
+                topics:
+                  - path: "TaiwanPrecision/Taoyuan/Assembly/Line1/Robot1/Telemetry/JointPositions"
+                    description: "六軸關節角度"
+                    payload_type: "json"
+                    frequency: "每 100ms"
+                    qos: 0
+                    retain: false
+                    example_payload:
+                      joints:
+                        J1: 45.2
+                        J2: -30.5
+                        J3: 120.0
+                        J4: 0.0
+                        J5: -45.8
+                        J6: 90.1
+                      unit: "degrees"
+                      timestamp: "2024-01-15T08:30:00.100+08:00"
+
+      # --- 品質檢測區域 ---
+      - area_id: "QualityControl"
+        display_name: "品質檢測區"
+        description: "AOI、X-Ray、ICT 檢測設備"
+        
+        lines:
+          - line_id: "Inspection1"
+            display_name: "檢測線一"
+            
+            cells:
+              - cell_id: "AOI"
+                display_name: "自動光學檢測"
+                equipment_type: "aoi_machine"
+                
+                topics:
+                  - path: "TaiwanPrecision/Taoyuan/QualityControl/Inspection1/AOI/Event/InspectionResult"
+                    description: "AOI 檢測結果"
+                    payload_type: "json"
+                    frequency: "每片板檢測完成時"
+                    qos: 1
+                    retain: false
+                    example_payload:
+                      board_serial: "PCB-2024-01150001"
+                      result: "NG"
+                      defects:
+                        - type: "solder_bridge"
+                          component: "U3"
+                          location: { x: 45.2, y: 30.1 }
+                          confidence: 0.95
+                        - type: "missing_component"
+                          component: "R12"
+                          location: { x: 12.8, y: 55.3 }
+                          confidence: 0.99
+                      inspection_time_ms: 3200
+                      timestamp: "2024-01-15T08:35:00+08:00"
+
+  # ========================
+  # 新竹研發中心
+  # ========================
+  - site_id: "Hsinchu"
+    display_name: "新竹研發中心"
+    description: "研發與測試設施"
+    mqtt_prefix: "TaiwanPrecision/Hsinchu"
+    
+    areas:
+      - area_id: "Lab"
+        display_name: "測試實驗室"
+        description: "環境測試與可靠度驗證"
+        
+        lines:
+          - line_id: "EnvTest"
+            display_name: "環境測試區"
+            
+            cells:
+              - cell_id: "TempChamber1"
+                display_name: "恆溫恆濕試驗箱 1 號"
+                equipment_type: "environmental_chamber"
+                
+                topics:
+                  - path: "TaiwanPrecision/Hsinchu/Lab/EnvTest/TempChamber1/Telemetry/Environment"
+                    description: "箱內環境數據"
+                    payload_type: "json"
+                    frequency: "每 10 秒"
+                    qos: 1
+                    retain: false
+                    example_payload:
+                      temperature:
+                        setpoint: -40.0
+                        actual: -39.8
+                        unit: "°C"
+                      humidity:
+                        setpoint: 85.0
+                        actual: 84.5
+                        unit: "%RH"
+                      test_profile: "MIL-STD-810G-501.7"
+                      elapsed_hours: 12.5
+
+# =============================================================================
+# Topic 命名規則摘要
+# =============================================================================
+# 
+# 格式: {企業}/{廠區}/{區域}/{產線}/{設備}/{類別}/{數據點}
+#
+# 類別 (Category) 標準值:
+#   - Telemetry   → 遙測數據（溫度、壓力、速度等感測值）
+#   - Status      → 設備狀態（運行中、停機、維護中）
+#   - Alarm       → 告警與事件
+#   - Command     → 控制指令（啟動、停止、參數調整）
+#   - Event       → 製程事件（檢測結果、批次開始/結束）
+#   - Config      → 設備設定（配方參數、閾值設定）
+#   - Maintenance → 維護資訊（保養紀錄、OEE 指標）
+#
+# QoS 建議:
+#   - QoS 0 → 高頻遙測（丟一筆不影響）
+#   - QoS 1 → 告警、事件、狀態（不可遺失）
+#   - QoS 2 → 控制指令（確保僅執行一次，少用）
+#
+# Retain 建議:
+#   - retain: true  → Status, Alarm（新訂閱者需要看到最新狀態）
+#   - retain: false → Telemetry, Command, Event（時序數據不需 retain）
+# =============================================================================

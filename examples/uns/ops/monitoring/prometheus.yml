@@ -1,0 +1,90 @@
+# ═══════════════════════════════════════════════════════════
+# Prometheus 設定檔 — UNS 監控
+# ═══════════════════════════════════════════════════════════
+
+global:
+  scrape_interval: 15s         # 預設每 15 秒抓一次
+  evaluation_interval: 15s     # 告警規則評估間隔
+  scrape_timeout: 10s
+
+# 告警規則檔案
+rule_files:
+  - /etc/prometheus/rules/alerts.yml
+
+# 告警推送到 Alertmanager（如有部署）
+# alerting:
+#   alertmanagers:
+#     - static_configs:
+#         - targets: ["alertmanager:9093"]
+
+
+# ═══════════════════════════════════════════════════════════
+# Scrape 目標
+# ═══════════════════════════════════════════════════════════
+
+scrape_configs:
+
+  # ── Prometheus 自身 ──────────────────────────────────────
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # ── MQTT Broker (Mosquitto) ─────────────────────────────
+  # 透過 mosquitto-exporter 取得 $SYS topic 指標
+  - job_name: "mosquitto"
+    scrape_interval: 10s       # MQTT 指標抓快一點
+    static_configs:
+      - targets: ["mosquitto-exporter:9234"]
+        labels:
+          component: "mqtt-broker"
+          site: "Taoyuan"
+
+  # ── UNS Consumer ────────────────────────────────────────
+  # Consumer 用 prometheus_client 在 :8000 暴露 /metrics
+  # 如果有多個 Consumer instance，加多個 target
+  - job_name: "uns-consumer"
+    scrape_interval: 10s
+    static_configs:
+      - targets: ["host.docker.internal:8000"]
+        labels:
+          component: "consumer"
+          instance_id: "consumer-01"
+      # 多 Consumer 範例：
+      # - targets: ["consumer-02:8000"]
+      #   labels:
+      #     component: "consumer"
+      #     instance_id: "consumer-02"
+
+  # ── CDC Transform Service ───────────────────────────────
+  # CDC Transform 也用 prometheus_client，port 8001
+  - job_name: "cdc-transform"
+    scrape_interval: 15s
+    static_configs:
+      - targets: ["host.docker.internal:8001"]
+        labels:
+          component: "cdc-transform"
+
+  # ── TimescaleDB ─────────────────────────────────────────
+  # 透過 postgres-exporter 取得 PostgreSQL 指標
+  - job_name: "timescaledb"
+    scrape_interval: 30s       # DB 指標不需要太頻繁
+    static_configs:
+      - targets: ["postgres-exporter:9187"]
+        labels:
+          component: "timescaledb"
+          database: "uns_timeseries"
+
+  # ── Debezium (JMX via jmx-exporter) ────────────────────
+  # 如果 Debezium Connect 有部署 jmx-exporter，取消以下註解
+  # - job_name: "debezium"
+  #   scrape_interval: 15s
+  #   static_configs:
+  #     - targets: ["debezium-connect:9404"]
+  #       labels:
+  #         component: "debezium"
+
+  # ── Node Exporter（系統指標，可選） ─────────────────────
+  # 監控 host 的 CPU / Memory / Disk
+  # - job_name: "node"
+  #   static_configs:
+  #     - targets: ["node-exporter:9100"]

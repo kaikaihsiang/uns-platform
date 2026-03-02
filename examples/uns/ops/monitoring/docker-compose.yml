@@ -1,0 +1,82 @@
+# ═══════════════════════════════════════════════════════════
+# UNS 監控套件 — Prometheus + Grafana + Exporters
+# ═══════════════════════════════════════════════════════════
+#
+# 一鍵啟動 UNS 的監控基礎設施：
+#   - Prometheus    :9090  — 指標收集
+#   - Grafana       :3000  — 儀表板 + 告警
+#   - mosquitto-exporter   — MQTT Broker 指標
+#   - postgres-exporter    — TimescaleDB 指標
+#
+# 前置條件：
+#   - MQTT Broker 和 TimescaleDB 已在運行
+#   - Consumer 的 prometheus_client HTTP server 在 :8000
+#
+# 用法：
+#   cd ops/monitoring
+#   docker compose up -d
+#
+#   Grafana: http://localhost:3000 (admin / admin)
+#   Prometheus: http://localhost:9090
+
+services:
+
+  # ── Prometheus ─────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    container_name: uns-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus-alerts.yml:/etc/prometheus/rules/alerts.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=30d"
+      - "--web.enable-lifecycle"    # 支援 /-/reload
+    restart: unless-stopped
+
+  # ── Grafana ────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: uns-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana-data:/var/lib/grafana
+    restart: unless-stopped
+
+  # ── MQTT Broker Exporter ───────────────────────────────
+  # 從 Mosquitto 的 $SYS topic 讀取指標，轉為 Prometheus format
+  mosquitto-exporter:
+    image: sapcc/mosquitto-exporter:0.8.0
+    container_name: uns-mosquitto-exporter
+    environment:
+      # 連到你的 MQTT Broker（修改為實際地址）
+      - BROKER_ENDPOINT=tcp://host.docker.internal:1883
+      # 如果 Broker 需要認證：
+      # - MQTT_USER=grafana-monitor
+      # - MQTT_PASS=your_password
+    ports:
+      - "9234:9234"
+    restart: unless-stopped
+
+  # ── PostgreSQL / TimescaleDB Exporter ──────────────────
+  postgres-exporter:
+    image: quay.io/prometheuscommunity/postgres-exporter:v0.15.0
+    container_name: uns-postgres-exporter
+    environment:
+      # 連到你的 TimescaleDB（修改為實際地址）
+      DATA_SOURCE_NAME: "postgresql://uns_reader:CHANGE_ME@host.docker.internal:5432/uns_timeseries?sslmode=disable"
+    ports:
+      - "9187:9187"
+    restart: unless-stopped
+
+volumes:
+  prometheus-data:
+  grafana-data:
