@@ -1,0 +1,56 @@
+# =============================================================================
+# UNS Platform — Docker Compose (Infrastructure Only)
+# =============================================================================
+# 只開 EMQX + TimescaleDB。Backend / Data Engine 在本機跑。
+# 
+# 啟動：docker compose up -d
+# 停止：docker compose down
+# 清除資料：docker compose down -v
+# =============================================================================
+
+services:
+  # --- EMQX MQTT Broker ---
+  emqx:
+    image: emqx/emqx:5.8.6
+    container_name: uns-emqx
+    ports:
+      - "1883:1883"     # MQTT
+      - "8083:8083"     # MQTT WebSocket
+      - "18083:18083"   # EMQX Dashboard / REST API
+    environment:
+      EMQX_DASHBOARD__DEFAULT_USERNAME: ${EMQX_DASHBOARD__DEFAULT_USERNAME:-admin}
+      EMQX_DASHBOARD__DEFAULT_PASSWORD: ${EMQX_DASHBOARD__DEFAULT_PASSWORD:-public}
+      # 允許匿名連線（dev only）
+      EMQX_AUTHORIZATION__NO_MATCH: allow
+      EMQX_AUTHORIZATION__DENY_ACTION: ignore
+    volumes:
+      - ./docker/emqx/acl.conf:/opt/emqx/etc/acl.conf:ro
+      - ./.docker-data/emqx-data:/opt/emqx/data
+      - ./.docker-data/emqx-log:/opt/emqx/log
+    healthcheck:
+      test: ["CMD", "emqx", "ctl", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # --- TimescaleDB ---
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: uns-timescaledb
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-uns_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-uns_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-uns_timeseries}
+    volumes:
+      - ./.docker-data/timescaledb-data:/var/lib/postgresql/data
+      - ./docker/init-db:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-uns_admin} -d ${POSTGRES_DB:-uns_timeseries}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+

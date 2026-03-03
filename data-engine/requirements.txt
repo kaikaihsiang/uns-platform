@@ -1,0 +1,4 @@
+# UNS Data Engine — Dependencies
+gmqtt>=0.6.12
+psycopg2-binary>=2.9
+jsonpath-ng>=1.5.3
