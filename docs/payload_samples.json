@@ -103,7 +103,7 @@
     "品質事件": {
       "topic": "Factory/Site1/QualityControl/Inspection1/AOI/Event/DefectDetected",
       "payload": {
-        "event_type": "defect_detected",
+        "event_code": "defect_detected",
         "board_serial": "PCB-2024-01150001",
         "work_order": "WO-2024-0042",
         "defect": {

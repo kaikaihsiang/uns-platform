@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.schemas import (
-    TagCreate, TagOut, TagDetailOut, TagMappingOut, TagChangeLogOut,
+    TagCreate, TagUpdate, TagOut, TagDetailOut, TagMappingOut, TagChangeLogOut,
     TagValueOut, TagValuesResponse, TagLatestResponse,
 )
 from app.services import tag_service
@@ -24,6 +24,55 @@ async def create_tag(body: TagCreate, db: AsyncSession = Depends(get_db)):
     """建立 Tag（自動建立 tag_source_mapping）。"""
     tag = await tag_service.create_tag(db, **body.model_dump())
     return tag
+
+
+@router.put("/{tag_id}", response_model=TagOut)
+async def update_tag(tag_id: int, body: TagUpdate, db: AsyncSession = Depends(get_db)):
+    """更新 Tag 資訊。"""
+    try:
+        return await tag_service.update_tag(db, tag_id, **body.model_dump(exclude_unset=True))
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+# ─── Recycle Bin ──────────────────────────────────────────────
+
+
+@router.get("/deleted", response_model=list[TagOut])
+async def get_deleted_tags(db: AsyncSession = Depends(get_db)):
+    """取得所有 Soft-deleted 的 Tags。"""
+    return await tag_service.get_deleted_tags(db)
+
+
+@router.put("/{tag_id}/restore", response_model=TagOut)
+async def restore_tag(tag_id: int, db: AsyncSession = Depends(get_db)):
+    """從資源回收桶還原 Tag。"""
+    try:
+        return await tag_service.restore_tag(db, tag_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.delete("/{tag_id}/hard", status_code=204)
+async def hard_delete_tag(tag_id: int, db: AsyncSession = Depends(get_db)):
+    """徹底抹除 Tag，包含所有 mappings、變更紀錄"""
+    try:
+        await tag_service.hard_delete_tag(db, tag_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.delete("/{tag_id}", response_model=TagOut)
+async def delete_tag(tag_id: int, db: AsyncSession = Depends(get_db)):
+    """Soft delete Tag。"""
+    try:
+        return await tag_service.soft_delete_tag(db, tag_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+# ─── Regular CRUD ─────────────────────────────────────────────
+
 
 
 @router.get("/{tag_id}/detail", response_model=TagDetailOut)
@@ -47,9 +96,13 @@ async def get_tag_detail(tag_id: int, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/{node_path:path}/list", response_model=list[TagOut])
-async def list_tags(node_path: str, db: AsyncSession = Depends(get_db)):
+async def list_tags(
+    node_path: str, 
+    recursive: bool = Query(False, description="Whether to list tags recursively under the path"),
+    db: AsyncSession = Depends(get_db)
+):
     """取得某 node 底下的所有 Tag。"""
-    tags = await tag_service.list_tags_by_path(db, node_path)
+    tags = await tag_service.list_tags_by_path(db, node_path, recursive=recursive)
     return tags
 
 

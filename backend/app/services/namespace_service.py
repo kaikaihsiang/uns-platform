@@ -1,12 +1,20 @@
 """
 Namespace Service — Business logic for Namespace CRUD
 """
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import NamespaceNode, Tag, TagSourceMapping, TagChangeLog
+
+
+async def get_all_nodes(db: AsyncSession):
+    """取得所有 Nodes 的平坦列表（不分層級）。"""
+    result = await db.execute(
+        select(NamespaceNode).where(NamespaceNode.deleted_at == None)
+    )
+    return result.scalars().all()
 
 
 async def get_tree(db: AsyncSession) -> list[NamespaceNode]:
@@ -31,7 +39,7 @@ def _build_tree(nodes: list[NamespaceNode]) -> list[dict]:
             "name": n.name,
             "node_type": n.node_type,
             "full_path": n.full_path,
-            "schema_type_id": n.schema_type_id,
+            "schema_id": n.schema_id,
             "persist_mode": n.persist_mode,
             "retention_days": n.retention_days,
             "description": n.description,
@@ -62,7 +70,7 @@ async def create_node(
     name: str,
     node_type: str,
     description: str | None = None,
-    schema_type_id: int | None = None,
+    schema_id: int | None = None,
 ) -> NamespaceNode:
     """建立 Namespace Node。"""
     # 計算 full_path
@@ -80,7 +88,7 @@ async def create_node(
         node_type=node_type,
         full_path=full_path,
         description=description,
-        schema_type_id=schema_type_id,
+        schema_id=schema_id,
     )
     db.add(node)
     await db.commit()
@@ -101,7 +109,7 @@ async def rename_node(db: AsyncSession, node_id: int, new_name: str) -> Namespac
 
     node.name = new_name
     node.full_path = new_path
-    node.updated_at = datetime.now()
+    node.updated_at = datetime.now(timezone.utc)
 
     # 更新所有子 node 的 full_path
     await _update_children_paths(db, old_path, new_path)
@@ -111,26 +119,31 @@ async def rename_node(db: AsyncSession, node_id: int, new_name: str) -> Namespac
     return node
 
 
-async def move_node(db: AsyncSession, node_id: int, new_parent_id: int) -> NamespaceNode:
+async def move_node(db: AsyncSession, node_id: int, new_parent_id: int | None) -> NamespaceNode:
     """
     移動 Node 到新 parent。
+    new_parent_id = None 代表移動到根層級。
     觸發 Live Migration：更新 tag_source_mapping + 產生 audit log。
     """
     node = await db.get(NamespaceNode, node_id)
     if not node or node.deleted_at:
         raise ValueError(f"Node {node_id} not found")
 
-    new_parent = await db.get(NamespaceNode, new_parent_id)
-    if not new_parent or new_parent.deleted_at:
-        raise ValueError(f"New parent node {new_parent_id} not found")
-
     old_path = node.full_path
-    new_path = f"{new_parent.full_path}/{node.name}"
 
-    # 更新 node
-    node.parent_id = new_parent_id
+    if new_parent_id is None:
+        # Move to root level
+        new_path = node.name
+        node.parent_id = None
+    else:
+        new_parent = await db.get(NamespaceNode, new_parent_id)
+        if not new_parent or new_parent.deleted_at:
+            raise ValueError(f"New parent node {new_parent_id} not found")
+        new_path = f"{new_parent.full_path}/{node.name}"
+        node.parent_id = new_parent_id
+
     node.full_path = new_path
-    node.updated_at = datetime.now()
+    node.updated_at = datetime.now(timezone.utc)
 
     # 更新所有子 node 的 full_path
     await _update_children_paths(db, old_path, new_path)
@@ -143,13 +156,15 @@ async def move_node(db: AsyncSession, node_id: int, new_parent_id: int) -> Names
     return node
 
 
+from app.services import tag_service
+
 async def soft_delete_node(db: AsyncSession, node_id: int) -> NamespaceNode:
     """Soft delete Node（標記 deleted_at）。"""
     node = await db.get(NamespaceNode, node_id)
     if not node:
         raise ValueError(f"Node {node_id} not found")
 
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     node.deleted_at = now
     node.updated_at = now
 
@@ -164,9 +179,83 @@ async def soft_delete_node(db: AsyncSession, node_id: int) -> NamespaceNode:
         child.deleted_at = now
         child.updated_at = now
 
+    # 同時軟刪除對應路徑下的所有 Tags
+    from app.models import Tag
+    tags_result = await db.execute(
+        select(Tag).where(
+            Tag.asset_path.like(f"{node.full_path}%"),
+            Tag.deleted_at.is_(None)
+        )
+    )
+    for tag in tags_result.scalars():
+        await tag_service.soft_delete_tag(db, tag.tag_id)
+
     await db.commit()
     await db.refresh(node)
     return node
+
+
+# ─── Recycle Bin (Feature 10) ─────────────────────────────────
+
+
+async def get_deleted_nodes(db: AsyncSession) -> list[NamespaceNode]:
+    """取得所有放在資源回收桶 (Soft-deleted) 的 Node。"""
+    result = await db.execute(
+        select(NamespaceNode)
+        .where(NamespaceNode.deleted_at.is_not(None))
+        .order_by(NamespaceNode.deleted_at.desc())
+    )
+    return list(result.scalars().all())
+
+
+async def restore_node(db: AsyncSession, node_id: int) -> NamespaceNode:
+    """從資源回收桶還原 Node（取消 deleted_at 標記）。"""
+    node = await db.get(NamespaceNode, node_id)
+    if not node or not node.deleted_at:
+        raise ValueError(f"Deleted Node {node_id} not found")
+
+    node.deleted_at = None
+    node.updated_at = datetime.now(timezone.utc)
+
+    # 同時還原所有曾被一起刪除的子 node
+    result = await db.execute(
+        select(NamespaceNode).where(
+            NamespaceNode.full_path.like(f"{node.full_path}/%"),
+            NamespaceNode.deleted_at.is_not(None),
+        )
+    )
+    for child in result.scalars():
+        child.deleted_at = None
+        child.updated_at = datetime.now(timezone.utc)
+
+    await db.commit()
+    await db.refresh(node)
+    return node
+
+
+async def hard_delete_node(db: AsyncSession, node_id: int) -> None:
+    """徹底刪除 Node（包含所有子節點），從資料庫中抹除。"""
+    node = await db.get(NamespaceNode, node_id)
+    if not node:
+        raise ValueError(f"Node {node_id} not found")
+
+    # 找出所有子節點並刪除
+    result = await db.execute(
+        select(NamespaceNode).where(
+            NamespaceNode.full_path.like(f"{node.full_path}/%")
+        )
+    )
+    children = list(result.scalars().all())
+    # Sort children by path length descending (deepest first) to avoid FK violations
+    children.sort(key=lambda n: len(n.full_path), reverse=True)
+    
+    for child in children:
+        await db.delete(child)
+        await db.flush()
+
+    # 刪除自己
+    await db.delete(node)
+    await db.commit()
 
 
 async def update_persistence(
@@ -181,7 +270,7 @@ async def update_persistence(
 
     node.persist_mode = persist_mode
     node.retention_days = retention_days
-    node.updated_at = datetime.now()
+    node.updated_at = datetime.now(timezone.utc)
 
     await db.commit()
     await db.refresh(node)
@@ -202,7 +291,7 @@ async def _update_children_paths(
     )
     for child in result.scalars():
         child.full_path = new_prefix + child.full_path[len(old_prefix):]
-        child.updated_at = datetime.now()
+        child.updated_at = datetime.now(timezone.utc)
 
 
 async def _live_migrate_tags(

@@ -194,7 +194,8 @@
 │  │  TimescaleDB (外部元件)                       │    │
 │  │  - Namespace 定義（namespace_nodes）           │    │
 │  │  - Tag Registry（tags + tag_source_mapping）  │    │
-│  │  - Schema Types（schema_types）               │    │
+│  │  - Payload Schemas（uns_payload_schemas）         │    │
+│  │  - Master Data Codes（master_data_codes）       │    │
 │  │  - Time-Series（ts_telemetry, ts_status...）  │    │
 │  │  - Raw Payloads（ts_raw_payloads）            │    │
 │  └──────────────────────────────────────────────┘    │
@@ -238,7 +239,21 @@ Node 分兩種：
 - **Structural Node**：純階層用（Enterprise / Site / Area / Line / Equipment）
 - **Topic Node**：對應到一個 MQTT topic，可以收發資料
 
-### 3.2 Namespace Node 表
+### 3.2 階層式生產脈絡解析 (Hierarchical Context Resolution)
+
+**核心設計原則：** Tag 嚴格歸屬於它所在的 Topic Node（例如 `Telemetry`, `Event`），而不是強迫綁定於父層設備。
+
+在將資料寫入時序表 (如 `ts_telemetry`) 時，Data Engine 具備自動向「上」文脈解析的能力，以獲取當前的生產批次 (`lot_id`, `run_id`)：
+1. **文脈查詢起點**：Data Engine 收到 MQTT Topic (例如 `Enterprise/.../Printer/Telemetry`) 時，會將該完整路徑作為 `asset_path` 進行快取查詢。
+2. **向上查找 (Walk-up the tree)**：
+   - 系統首先詢問：「這個 `Telemetry` 節點有沒有綁定 `ProductionRun`？」
+   - 若沒有，系統會自動捨棄最後一段路徑，往父層詢問：「那上一層的 `Printer` (Equipment) 有沒有綁定 `ProductionRun`？」
+3. **上下文繼承 (Context Inheritance)**：只要父層或祖父層有活躍的 Lot，底下的所有 Topic 資料流都能自動繼承並附加該生產脈絡，實現 ISA-95 標準中的 Equipment 狀態向下關聯。
+4. **活動時間追蹤 (Activity Tracking)**：每當 Data Engine 成功匹配並處理一個 Tag 的資料時，會自動更新 `tags.last_data_at` 欄位，供管理者監控資料點的活跃狀態。
+
+這樣的設計保證了 MQTT Topic Tree 與 UI 呈現的直覺性（所見即所得），同時確保資料治理與生產脈絡的完整對應。
+
+### 3.3 Namespace Node 表
 
 ```sql
 CREATE TABLE namespace_nodes (
@@ -249,7 +264,7 @@ CREATE TABLE namespace_nodes (
     full_path       TEXT NOT NULL UNIQUE,    -- "Enterprise/Site/Area/Line1/Printer/Telemetry"
 
     -- Topic Node 專屬
-    schema_type_id  INTEGER REFERENCES schema_types(type_id),
+    schema_id       INTEGER REFERENCES uns_payload_schemas(schema_id),
     persist_mode    TEXT DEFAULT 'db',       -- db / retain / passthrough
     retention_days  INTEGER DEFAULT 90,
 
@@ -323,33 +338,81 @@ MQTT Message 進來
     │
     ▼
 [5] Raw Storage（如果 Schema Type 設定 store_raw = true）
-    │  └── INSERT to ts_raw_payloads
+    │  └── INSERT to ts_raw_payloads（包含計算後的 payload_size）
     │
-    ▼
-[6] Metrics Update（更新 Consumer metrics）
+[6] Metrics Update（更新 Consumer metrics / 更新 tags.last_data_at）
 ```
+
+> ⚠️ **重要架構邊界 (Master Data 處理原則)**：
+> Payload Processing Pipeline 中**絕對不包含**任何阻斷式 Database Lookup 或「代碼翻譯」。
+> Data Engine 是一個無腦搬運工，它預期 MQTT 傳來的資料（如 state: "PRD"）便已經是標準化的代碼。真正的代碼翻譯必須發生在邊緣層 (Edge Gateway) 或是 EAP 中。
+
+### 4.4 Master Data 補齊與驅動邏輯 (Metadata-Driven Logic)
+
+**設計決策**：Data Engine 不應透過「字串比對」來辨識業務邏輯，而應由 `master_data_codes` 的元數據驅動行為。
+
+- **啟動加載**：Data Engine 啟動時會將 `master_data_codes` 表中的所有對應關係一次性載入記憶體。
+- **自動補齊**：當處理 `Status`, `Alarm`, `Event` 類別資料時，Data Engine 會自動查詢快取並補位對應的子代碼與類別標籤（如 `sub_state_code`, `code_category`）。
+- **生命週期驅動 (Lifecycle Trigger)**：
+  - Data Engine 透過 `metadata->>'lifecycle_trigger'` 辨識關鍵事件。
+  - 值為 `start`：觸發 `POST /production-runs/`（建立新批次）。
+  - 值為 `end`：觸發 `PUT /production-runs/{id}/status`（結束批次）。
+  - **優勢**：新增或更改機台事件名稱（如改用 `WO_START`）時，只需更新資料庫設定，無需修改 Data Engine 程式碼。
+
+### 4.5 唯一識別碼合成策略 (Synthetic ID Generation)
+(此處保留原有 4.5 內容...)
+
+### 4.6 生產脈絡自動提升 (Context Up-leveling)
+
+為了平衡「物理設備採集」與「數位模型分析」，Data Engine 實作了自動路徑提升邏輯：
+
+- **行為**：當機台（Equipment）發出 `start`/`end` 生命週期指令時，Data Engine 自動將該生產批次的**作用域 (Scope)** 提升至父層節點（Line/WorkCenter）。
+- **目的**：
+  - **物理真實性**：尊重 MES 指令通常發送到首台機台或站點 PC 的現實。
+  - **資料繼承性**：讓產線上所有機台（即便未收到指令）都能透過向上查找自動關聯到同一個 `run_id`。
 
 ---
 
-## 5. Schema Type 系統
+## 5. Payload Schema 系統 (UNS Payload Schemas)
+
+### 5.0 Data Category 路由分流機制
+
+為了提供語義化的資料存取與高效查詢，平台根據資料的語義類別 (Category) 將 Payload 分流寫入不同的目標表。
+
+#### 5.0.1 路由優先順序 (ADR-001)
+
+Data Engine 決定目標表的邏輯依序為：
+1. **Payload Schema 定義的 `category`** (儲存於 `uns_payload_schemas.schema_category`)。
+2. **Topic 命名慣例 Fallback**：若 Schema 未指定類別，則根據 Topic 最後一段路徑判斷（如 `.../Telemetry` 歸為 `telemetry`）。
+3. **預設值**：若以上皆無，預設歸類為 `telemetry`。
+
+#### 5.0.2 分流目標表矩陣
+
+| Category | 目標表 | 核心語義 |
+|---|---|---|
+| `telemetry` | `ts_telemetry` | 連續遙測數值（預設） |
+| `status` | `ts_status` | 設備狀態機 (Machine States) |
+| `alarm` | `ts_alarms` | 警報事件與嚴重度 |
+| `event` | `ts_events` | 離散生產事件 (Lot Move, Operation) |
+| `measurement` | `ts_measurements` | 品質檢驗/SPC 量測值 |
+| `metrics` | `ts_metrics` | 預先彙總的統計指標 (OEE, Kpi) |
 
 ### 5.1 概念
 
-Schema Type 是可重用的 payload 結構定義，類似 OOP 的 class。
+Payload Schema 是可重用的 payload 結構定義，類似 OOP 的 class。
 
 ```
-Schema Type: "SMT_Printer_Telemetry"（定義一次）
+Payload Schema: "SMT_Printer_Telemetry"（定義一次）
   → 套用到 Line1/Printer/Telemetry（實例 1）
   → 套用到 Line2/Printer/Telemetry（實例 2）
   → 套用到 Line3/Printer/Telemetry（實例 3）
-
-100 台同型設備 → 同一個 Schema Type
 ```
 
-### 5.2 Schema Type 完整定義
+### 5.2 Payload Schema 完整定義
 
 ```yaml
-type_name: "SMT_Printer_Telemetry"
+schema_name: "SMT_Printer_Telemetry"
+schema_category: "telemetry"
 decoder: "json"
 timestamp_field: "_meta.timestamp"         # payload 中的時間戳欄位（null = 用 MQTT 收到時間）
 store_raw: true
@@ -366,6 +429,7 @@ fields:
     unit: "°C"
     extract: true                          # 是否拆解為獨立 Tag
     persist: true                          # 是否寫入 ts_telemetry
+    target_column: "severity"              # [NEW] 目標資料庫欄位 (ADR-003)，支援分流映射
     deadband: 0.1                          # 變化量 < 此值不寫入（null = 全部寫）
     array_mode: "single"                   # single / expand / avg / last
 
@@ -390,6 +454,12 @@ fields:
     unit: "%"
     extract: true
     persist: false                         # 不存 DB，只 retain
+
+  - name: "panel_id"                       # [NEW] SPC 範例
+    path: "$.panel_id"
+    type: "string"
+    target_column: "sample_id"             # 映射到 ts_measurements.sample_id
+    persist: true
 ```
 
 ### 5.3 欄位型別定義
@@ -424,18 +494,20 @@ fields:
 Deadband 狀態由 Data Engine 在記憶體中維護：
 `{tag_id: last_persisted_value}`
 
-### 5.6 Schema Type DB 表
+### 5.6 Payload Schema DB 表
 
 ```sql
-CREATE TABLE schema_types (
-    type_id            SERIAL PRIMARY KEY,
-    type_name          TEXT NOT NULL UNIQUE,
+CREATE TABLE uns_payload_schemas (
+    schema_id          SERIAL PRIMARY KEY,
+    schema_name        TEXT NOT NULL UNIQUE,
+    schema_category    TEXT NOT NULL DEFAULT 'telemetry',
     decoder            TEXT DEFAULT 'json',
     timestamp_field    TEXT,
     store_raw          BOOLEAN DEFAULT true,
     raw_retention_days INTEGER DEFAULT 30,
     on_schema_mismatch TEXT DEFAULT 'log_and_store',
     on_new_field       TEXT DEFAULT 'suggest',
+
     fields             JSONB NOT NULL,          -- 欄位定義陣列
     version            INTEGER DEFAULT 1,
     created_at         TIMESTAMPTZ DEFAULT NOW(),
@@ -443,28 +515,163 @@ CREATE TABLE schema_types (
 );
 ```
 
-### 5.7 Auto-detect 引擎
+### 5.7 Master Data & 語義字典 (Semantic Dictionary)
 
+系統透過 `master_data_codes` 表實現代碼到語義的映射。
+
+```sql
+CREATE TABLE master_data_codes (
+    code_category   TEXT NOT NULL,              -- 如 'equipment_state', 'alarm_code'
+    code_value      TEXT NOT NULL,              -- 主代碼 (如 'PRD', 'UDT')
+    sub_code_value  TEXT NOT NULL DEFAULT '',   -- 子代碼 (如 'E-VAC-004')，預設空字串
+    label           TEXT NOT NULL,              -- 顯示名稱 (如 'Productive')
+    metadata        JSONB,                      -- OEE 權重、顏色等
+    description     TEXT,
+    PRIMARY KEY (code_category, code_value, sub_code_value)
+);
+
+-- 設計決策：sub_code_value 使用 DEFAULT '' 而非 NULL，是為了確保 PRIMARY KEY 的一致性，
+-- 並支援 (code_category, code) 與 (code_category, code, sub_code) 兩種類層級的代碼定義。
 ```
-輸入：收到一筆 payload，但該 topic 沒有綁定 Schema Type
-處理：
-  1. Parse payload → 取得所有 key + value
-  2. 推斷每個 key 的 type（float / string / boolean / json）
-  3. 如果是第一次看到這個 topic → 建立 "suggested" Schema Type
-  4. 如果已有 suggested → 比對新 payload 和既有定義
-     - 新欄位 → 標記為 "detected_new_field"
-     - 欄位消失 → 標記為 "optional"
-     - 型別改變 → 標記為 "type_conflict"
-  5. 在 UI 上顯示建議，等管理者確認
 
-狀態：
-  suggested → 尚未確認，資料只存 raw
-  confirmed → 管理者確認，開始 extract + persist
-  modified  → 管理者調整過
+   避免單一異常 payload 產生錯誤推斷。
 
-Auto-detect 累積 N 筆（預設 100）payload 後才產生建議，
-避免單一異常 payload 產生錯誤推斷。
+### 5.8 時序資料表結構 (Time-Series Table Schemas)
+
+為了支援語義化查詢與 Master Data 關聯，核心時序表定義如下：
+
+#### 5.8.1 ts_telemetry (核心遙測數值)
+```sql
+CREATE TABLE ts_telemetry (
+    time            TIMESTAMPTZ NOT NULL,
+    tag_id          INTEGER NOT NULL REFERENCES tags(tag_id),
+    value           DOUBLE PRECISION,            -- 數值型資料
+    value_text      TEXT,                        -- 字串型資料 (如狀態文字)
+    value_json      JSONB,                       -- 複雜物件資料
+    run_id          INTEGER,                     -- 生產批次連結
+    lot_id          TEXT
+);
 ```
+
+#### 5.8.2 ts_raw_payloads (原始報文儲存)
+```sql
+CREATE TABLE ts_raw_payloads (
+    time            TIMESTAMPTZ NOT NULL,
+    tag_id          INTEGER NOT NULL REFERENCES tags(tag_id),
+    schema_id       INTEGER REFERENCES uns_payload_schemas(schema_id),
+    payload         JSONB NOT NULL,              -- 原始 JSON 內容
+    payload_size    INTEGER,                     -- 報文大小 (Bytes)
+    run_id          INTEGER
+);
+```
+
+#### 5.8.3 ts_status (設備狀態)
+```sql
+CREATE TABLE ts_status (
+    time            TIMESTAMPTZ NOT NULL,
+    tag_id          INTEGER NOT NULL REFERENCES tags(tag_id),
+    state_code      TEXT NOT NULL,               -- 主狀態 (code_value)
+    sub_state_code  TEXT,                        -- 子狀態 (sub_code_value)
+    code_category   TEXT,                        -- 連結到 master_data_codes.code_category
+    mode            TEXT,                        -- 'auto' / 'manual'
+    run_id          INTEGER,                     -- 生產批次連結
+    lot_id          TEXT
+);
+```
+
+#### 5.8.4 ts_alarms (告警紀錄)
+```sql
+CREATE TABLE ts_alarms (
+    time            TIMESTAMPTZ NOT NULL,
+    tag_id          INTEGER NOT NULL REFERENCES tags(tag_id),
+    alarm_id        TEXT NOT NULL,
+    alarm_code      TEXT NOT NULL,               -- 主警報碼 (code_value)
+    sub_alarm_code  TEXT,                        -- 子警報碼 (sub_code_value)
+    code_category   TEXT,                        -- 連結到 master_data_codes.code_category
+    severity        TEXT NOT NULL,
+    message         TEXT,
+    value           DOUBLE PRECISION,            -- 觸發告警時的觀測值 (選填)
+    threshold       DOUBLE PRECISION,            -- 告警閾值 (選填)
+    alarm_status    TEXT NOT NULL,               -- 'active' / 'cleared'
+    run_id          INTEGER,
+    lot_id          TEXT
+);
+```
+
+#### 5.8.5 ts_events (生產事件)
+```sql
+CREATE TABLE ts_events (
+    time            TIMESTAMPTZ NOT NULL,
+    tag_id          INTEGER NOT NULL REFERENCES tags(tag_id),
+    event_id        TEXT NOT NULL,
+    event_code      TEXT NOT NULL,               -- 主事件 (code_value)
+    sub_event_code  TEXT,                        -- 子事件 (sub_code_value)
+    code_category   TEXT,                        -- 連結到 master_data_codes.code_category
+    result          TEXT,
+    run_id          INTEGER,
+    lot_id          TEXT,
+    details         JSONB                        -- 原始或額外資訊
+);
+```
+
+#### 5.8.6 ts_metrics (指標數據)
+```sql
+CREATE TABLE ts_metrics (
+    time            TIMESTAMPTZ NOT NULL,
+    tag_id          INTEGER NOT NULL REFERENCES tags(tag_id),
+    metric_category TEXT NOT NULL,               -- 連結到 master_data_codes.code_category
+    metric_code     TEXT NOT NULL,               -- 連結到 master_data_codes.code_value
+    sub_metric_code TEXT,                        -- 連結到 master_data_codes.sub_code_value
+    period          TEXT,                        -- 'hourly' / 'shift' / 'daily'
+    values          JSONB NOT NULL,              -- 具體指標數值 (e.g. {"oee": 0.85})
+    run_id          INTEGER,
+    context         JSONB                        -- 記錄計算時的生產參數
+);
+```
+
+#### 5.8.7 ts_measurements (品質量測/SPC)
+```sql
+CREATE TABLE ts_measurements (
+    time            TIMESTAMPTZ NOT NULL,
+    tag_id          INTEGER NOT NULL REFERENCES tags(tag_id),
+    value           DOUBLE PRECISION NOT NULL,   -- 量測原始值
+    spec_upper      DOUBLE PRECISION,
+    spec_lower      DOUBLE PRECISION,
+    target_value    DOUBLE PRECISION,            -- 目標值/Center
+    result          TEXT NOT NULL,               -- 'pass' / 'fail' / 'rework'
+    run_id          INTEGER,
+    lot_id          TEXT,
+    step_id         TEXT,                        -- 此量測對應的製程步序 (Step)
+    sample_id       TEXT,                        -- 樣本編號 (Serial No / Panel ID)
+    sample_position TEXT,                        -- 樣本位置 (Sub-location)
+    inspector       TEXT,                        -- 檢驗員或檢驗機台 ID
+    context         JSONB,                       -- 量測時的設備參數快照
+    details         JSONB                        -- 其他分析數據 (如影像路徑)
+);
+```
+
+### 5.9 Schema 管理介面 (Frontend)
+
+為了支援 Data Category 分流機制，前端管理介面須符合以下規格：
+
+#### 5.8.1 Schema Type 編輯器
+- **類別下拉選單**：在 Schema 新增/更新頁面中，必須提供 `category` 選單。
+- **目標欄位映射 (Target Column)**：針對非 Telemetry 類別，欄位編輯器必須支援 `target_column` 下拉選單，從目標資料表的可選欄位中選取。
+- **預設選取**：預設值應為 `telemetry`。
+
+#### 5.8.2 Schema 列表與標籤
+- **視覺標示**：在 Schema Type 列表（如 `SchemaOverview.tsx`）中，應以標籤 (Badge/Chip) 或圖示形式顯示其所屬類別。
+- **過濾功能**：支援依據 Category 過濾 Schema 列表。
+
+#### 5.8.3 Schema 建議管理 (Feature 6 整合)
+- **類別推斷顯示**：當展示由 Data Engine 自動偵測出的「建議 Schema」時，應明確標示系統推斷出的 `suggested_category`。
+- **手動確認**：管理者在「轉正」建議為正式 Schema 前，應可手動校正其 Category。
+
+#### 5.8.4 Tags 概覽與資料管理
+- **屬性揭露**：在 `TagsOverview.tsx` 中標示該 Tag 最終儲存的類別。
+- **CRUD 操作**：支援對既存 Tag 進行**編輯**（更新顯示名稱、欄位對應、單位等）與 **Soft Delete**。
+- **刪除安全性**：執行節點或 Tag 刪除時，UI 必須提供明確的警示，說明該操作將連帶影響的資源範圍。
+- **查詢路由**：前端 Data Visualization 模組在發起資料請求時，應根據該資料點的 Category 呼叫正確的後端 Endpoint。
 
 ---
 
@@ -530,6 +737,9 @@ Persist mode 設定在 `namespace_nodes` 表的 topic node 上。
 ```
 tag_id 是永久不變的 identifier（學 OSIsoft PI 的設計）。
 MQTT topic 改了 → tag_source_mapping 更新 → tag_id 不變 → 歷史資料連續。
+
+### 7.1.1 活躍度監控 (Activity Heartbeat)
+Data Engine 在每次寫入成功後，會同步更新 `tags.last_data_at` 欄位。這使得系統能即時辨識出哪些資料點已停止推送，無需掃描巨大的時序表。
 ```
 
 ### 7.2 涉及的表
@@ -573,13 +783,65 @@ After:
 | Audit Log | 記錄誰、什麼時候、做了什麼變更 |
 | 下游 Consumer 通知 | 訂閱舊 topic 的 Consumer 需要更新訂閱 |
 
-### 7.5 不允許的操作
+### 7.5 Tag 屬性更新與解耦規格 (Decoupling)
 
-| 操作 | 原因 | 替代方案 |
+當透過 API 更新 Tag 的屬性（如 `category`, `data_type`, `unit`）時，遵循以下穩定性原則：
+
+1.  **來源與分流解耦 (Source/Target Decoupling)**：
+    - **Category**：代表 Data Engine 的「寫入目標/分流規則」。修改 Category 僅會改變資料進入時序資料庫哪一張表（如從 `ts_events` 改為 `ts_alarms`）。
+    - **Topic Mapping**：代表資料的「來源/訂閱點」。修改 Tag 的屬性 **不會自動觸發** `tag_source_mapping` 的變更。
+2.  **設計用意**：
+    - 現場設備不應因為後端想要調整資料分類（例如把一個 Status 點改分類為 Alarm）就必須更改其發布資料的主題或斷線。
+    - 確保 Ingestion 管道的穩定性，同時保留後端數據治理與分流邏輯的靈活性。
+3.  **Audit Trail**：
+    - 所有屬性變更必須在 `tag_change_log` 留存紀錄，標示 `change_type = 'update'`。
+
+### 7.6 Tag 查詢可見度規格 (Registry Visibility)
+
+在 Tag 總覽頁面或透過 API 查詢特定節點下的 Tag 時，支援以下兩種過濾模式：
+
+1.  **精確匹配模式 (Exact Match)**：
+    - **行為**：只列出 `asset_path` 與查詢路徑完全一致的 Tag。
+    - **適用情境**：當使用者點擊 `Equip1/Telemetry` 時，只呈現綁定在該 Topic Node 下的資料點，排除其他同級或子級節點（預設模式）。
+2.  **遞迴匹配模式 (Recursive Match)**：
+    - **行為**：列出 `asset_path` 以查詢路徑為前綴的所有 Tag（即包含所有子路徑）。
+    - **適用情境**：當使用者點擊 `Line1` 時，希望一次看到該生產線下所有設備、所有 Topic 的 Tag 清單。
+
+**API 擴充語意：**
+- `GET /api/v1/tags/{node_path}/list?recursive=true` (預設為 false)
+
+### 7.5 不允許的操作與硬刪除限制
+
+| 操作 | 處理方式 | 原因與防護機制 |
 |---|---|---|
-| 直接刪除 Tag | 歷史資料會孤立 | Soft delete（標記 deleted_at） |
-| 合併兩個 Tag（不同 tag_id） | 歷史資料型態可能不同 | 建立 virtual tag（view） |
-| 改變 Tag 的 data_type | 歷史資料的型別已固定 | 建立新 Tag，舊 Tag deactivate |
+| **直接硬刪除 Tag** | 僅抹除 Meta (`tags`, `mappings`, `logs`) | 絕對**禁止**同步執行 `DELETE FROM ts_*`，以避免引發 TimescaleDB 的嚴重效能衰退（Anti-Pattern）。時序資料將成為無名孤兒，並交由 Retention Policy 清理。 |
+| **合併兩個 Tag** | 建立 virtual tag（view） | 歷史資料型態與來源軌跡可能不同，不應直接合併實體表紀錄。 |
+| **改變 Tag 資料型態** | 建立新 Tag，舊 Tag deactivate | 歷史資料的型別 (Schema) 已在時序表中固定。 |
+
+### 7.6 資料刪除與生命週期管理 (Data Deletion & Retention)
+
+在處理大數據量時序資料平台時，針對資料刪除與關聯完整性，我們有以下嚴格的架構取捨：
+
+**1. 避免時序表的硬刪除 (Anti-Pattern)**
+由於 `ts_telemetry`, `ts_alarms` 等時序資料表可能包含數千萬至數億筆資料，直接對這些表執行 `DELETE WHERE tag_id = X` 會引發劇烈的 Disk I/O 與效能瓶頸，甚至拖垮整套 Data Engine 的存寫。
+- **決策**：程式面上**不主動**刪除歷史時序資料。
+- **作法**：交由 TimescaleDB 的 Data Retention Policy（例如 30 天或 90 天後自動 drop chunks）來自然回收空間。若有法規需強制銷毀，則透過排程腳本離峰作業，不將此沉重邏輯綁死在 REST API 內。
+
+**2. 軟刪除優先 (Metadata Soft Delete)**
+當使用者從 UI 上刪除 Namespace Node 或 Tag 時：
+- 系統僅對 `namespace_nodes` 或 `tags` 表押上 `deleted_at` 時間戳記。
+- 支援**級聯軟刪除 (Cascading Soft Delete)**：軟刪除 Node 時，同步軟刪除底下所有的 Tags。
+- 目的僅在於維持前端 UI 乾淨，不再顯示孤兒節點。
+
+**3. 源頭攔截 (Drop at Data Engine)**
+針對已軟刪除的 Tag，雖然其歷史資料還在資料庫內，但系統必須阻止新資料繼續寫入（避免浪費空間）：
+- Data Engine (Pipeline) 的 `TagLookup` 快取與查詢，會自動過濾掉 `deleted_at IS NOT NULL` 的 Tag。
+- 由於找不到對應的活動 Tag，Data Engine 若收到來自這些廢棄主題的 MQTT 訊息，將直接丟棄 (Drop silently)，達到真正的資料流閘門阻絕。
+
+| 操作 | 說明 | 替代方案 |
+|---|---|---|
+| **Node / Tag 刪除** | 不觸動時序表，僅押 `deleted_at` | 依賴 Retention Policy 清理 |
+| **Data Engine 發現已刪除的 Tag** | 不寫入 DB，不建立關聯，直接拋棄 Payload | 無，這是效能保護機制 |
 
 ---
 
@@ -688,6 +950,80 @@ service UNSDataService {
 //   2. 同時 publish 到對應的 MQTT topic（讓即時 Consumer 收到）
 //   3. 如果是 LotMoveIn/Out → 同步更新 production_run
 ```
+
+### 8.6 System Settings REST API
+
+平台管理介面所需的系統狀態與設定 API：
+
+| Method | Path | 說明 | 狀態 |
+|---|---|---|---|
+| GET | `/api/v1/system/info` | 平台版本、DB/EMQX 連線狀態、connection pool、uptime | ✅ |
+| GET | `/api/v1/system/mqtt-stats` | EMQX 統計快照（proxy 轉發 EMQX REST API） | ✅ |
+| WebSocket | `/api/v1/system/mqtt-stats/ws` | 每 5 秒推送 EMQX 統計更新 | ✅ |
+| GET | `/api/v1/system/retention` | 各 hypertable 的 retention / compression 狀態 | ✅ |
+| PUT | `/api/v1/system/retention` | 修改 retention 設定（Phase 2，目前回 501） | ✅ (stub) |
+
+#### GET /system/info Response
+
+```json
+{
+  "platform_version": "0.1.0",
+  "backend_status": "ok",
+  "database": {
+    "status": "connected",
+    "version": "PostgreSQL 16.x + TimescaleDB 2.x",
+    "connection_pool": { "size": 5, "checked_out": 1 }
+  },
+  "mqtt_broker": {
+    "status": "connected",
+    "host": "localhost:1883",
+    "version": "EMQX 5.x"
+  },
+  "uptime_seconds": 45234
+}
+```
+
+#### GET /system/mqtt-stats Response
+
+```json
+{
+  "connected_clients": 3,
+  "topics_count": 14,
+  "subscriptions_count": 7,
+  "messages_received_total": 12345,
+  "messages_sent_total": 6789,
+  "messages_per_second": 2.5,
+  "retained_messages_count": 8
+}
+```
+
+#### EMQX 認證方式
+
+EMQX v5 REST API 使用 Bearer Token 認證：
+1. `POST /api/v5/login` 以 Dashboard 帳密取得 JWT
+2. 後續 API 呼叫在 Header 帶 `Authorization: Bearer {token}`
+3. `/api/v5/status` 是唯一不需認證的端點
+
+#### GET /system/retention Response
+
+```json
+{
+  "policies": [
+    {
+      "table_name": "ts_telemetry",
+      "retention_days": 365,
+      "compression_enabled": true,
+      "compress_after_days": 7
+    }
+  ]
+}
+```
+
+#### WebSocket /system/mqtt-stats/ws
+
+- 前端建立 WebSocket 連線
+- Backend 每 5 秒輪詢 EMQX REST API，推送最新統計 JSON
+- 前端關閉連線時，Backend 停止輪詢
 
 ---
 
@@ -844,17 +1180,32 @@ Platform Backend 呼叫 EMQX REST API
   - Consumer 啟動時標記 "bootstrap mode"，retained messages 只更新 cache 不寫 DB
 ```
 
-### EC-10：Namespace node 刪除
+### EC-10：資源回收桶 (Recycle Bin) 與 Soft Delete 機制
 
 ```
-場景：管理者刪除一個 Equipment node。
+場景：管理者誤刪了 Namespace Node (如 Equipment)、Schema Type，或特定的 Tag。
 設計決策：
-  - Soft delete：標記 deleted_at，不真刪
-  - 歷史資料保留，按 retention policy 自然過期
-  - tags 和 tag_source_mapping 標記為 inactive
-  - EMQX ACL 移除（不再允許 pub/sub）
-  - 如果仍有設備 pub 到該 topic → UI 顯示 "orphan data" 警告
-  - 可還原（undelete）
+  - 統一採用 Soft delete（標記 `deleted_at`），禁止直接刪除 (Hard delete)。
+  
+  [Namespace Node 刪除]
+    - 歷史資料保留，按 retention policy 自然過期
+    - tags 和 tag_source_mapping 標記為 inactive (未來支援)
+    - EMQX ACL 移除（不再允許 pub/sub）
+    - 如果仍有設備 pub 到該 topic → UI 顯示 "orphan data" 警告
+    
+  [Schema Type 刪除]
+    - 將 Schema Type 放入資源回收桶 (Soft delete)
+    - 即時資料流：針對綁定該 Schema Type 的 node，若持續收到 payload，
+      因 Schema Type 進入 deleted 狀態，可視為 "schema disabled" 
+      或直接進入 raw storage。
+      
+  [Tag 刪除]
+    - Tag 被禁用或進入回收桶 (Soft delete)
+    - 停止接收新資料，前端圖表隱藏，但歷史時序資料依然被封存不刪除。
+
+  [復原與徹底刪除]
+    - Restore (還原)：清除 `deleted_at`，恢復關聯狀態。
+    - Hard delete (徹底刪除)：從資源回收桶中永久抹除 DB 記錄，且級聯刪除底下的子資源。只針對真正不要的廢棄資料。
 ```
 
 ---
@@ -1013,7 +1364,7 @@ A: EAP 內建 MQTT client，在每個關鍵操作完成後 publish：
 
 ```
 Topic = 資料的「位置」（哪台設備、哪種大類）
-Payload field = 資料的「內容」（具體是什麼 event type）
+Payload field = 資料的「內容」（具體是什麼 event code）
 不要把「內容」塞到 topic 裡。
 ```
 
@@ -1027,7 +1378,7 @@ Payload field = 資料的「內容」（具體是什麼 event type）
 
 ### 13.3 Event 大類定義
 
-| Event 大類 | Topic 尾巴 | 包含的 event_type | 來源 |
+| Event 大類 | Topic 尾巴 | 包含的 event_code | 來源 |
 |---|---|---|---|
 | **Process** | `.../Event/Process` | ProcessStarted, ProcessCompleted, ProcessPaused, ProcessAborted, ProcessResumed | EAP / PLC |
 | **Recipe** | `.../Event/Recipe` | RecipeDownloaded, RecipeChanged, RecipeValidated, RecipeApproved | EAP |
@@ -1035,7 +1386,7 @@ Payload field = 資料的「內容」（具體是什麼 event type）
 | **Quality** | `.../Event/Quality` | QualityHold, QualityRelease, Disposition, SamplingRequired | MES / QMS |
 | **Maintenance** | `.../Event/Maintenance` | PMStarted, PMCompleted, Calibration, PartReplacement | CMMS |
 
-**新增同類的 event type 不需要改 namespace / topic / Schema Type。** 只需在 payload 的 event_type 帶新值。
+**新增同類的 event code 不需要改 namespace / topic / Schema Type。** 只需在 payload 的 event_code 帶新值。
 
 ### 13.4 Event Payload 標準格式
 
@@ -1047,7 +1398,7 @@ Payload field = 資料的「內容」（具體是什麼 event type）
     "timestamp": "2024-01-15T09:30:00+08:00"
   },
   "data": {
-    "event_type": "ProcessStarted",
+    "event_code": "ProcessStarted",
     "event_category": "Process",
     "lot_id": "LOT-001",
     "recipe_id": "Recipe-A",
@@ -1056,12 +1407,62 @@ Payload field = 資料的「內容」（具體是什麼 event type）
 }
 ```
 
-不同 event_type 的 payload 欄位可能有差異：
+不同 event_code 的 payload 欄位可能有差異：
 - `ProcessStarted` 有 `lot_id`, `recipe_id`
 - `ProcessCompleted` 多了 `duration_seconds`, `result`
 - `PMStarted` 有 `pm_type`, `technician`
 
 Schema Type 用 `on_schema_mismatch: "log_and_store"` 處理欄位差異。
+
+#### 12.3 JSON Schema 結構 (Schema Type)
+```json
+{
+  "type_name": "Fanuc_Robot_Telemetry",
+  "category": "telemetry",
+  "decoder": "json",
+  "timestamp_field": "$.header.timestamp",
+  "topic_pattern": "TaiwanPrecision/+/CNC/+/Telemetry",
+  "fields": [
+    {
+      "name": "spindle_speed",
+      "path": "$.data.spindle.speed",
+      "type": "float",
+      "unit": "rpm",
+      "extract": true,
+      "persist": true,
+      "deadband": null,
+      "array_mode": "single",
+      "target_column": "value"
+    },
+    {
+      "name": "error_level",
+      "path": "$.status.err_lvl",
+      "type": "string",
+      "extract": true,
+      "persist": true,
+      "target_column": "severity"
+    }
+  ]
+}
+```
+
+* **`target_column` (MVP 新增)**: 定義擷取出的數值應寫入目標資料表（由 category 決定）的哪個具體欄位。例如若 `category="alarm"`，可指定 `target_column="severity"`。若未指定且非 telemetry 類別，預設將放入該表的 `details` (JSONB) 欄位中。
+
+---
+
+### §13 異質 Payload 整合與 MVP 支援邊界 (ADR-003)
+
+為了應對 L0~L4 各層級系統千變萬化的 payload 結構，UNS Platform 採取 **Centralized ETL (Schema-Driven Mapping)** 與 **Dual Storage (Raw Payload Fallback)** 的雙軌策略。
+
+#### 13.1 MVP 支援的 Payload 模式
+MVP 階段的 Data Engine 支援以下三種核心模式：
+1. **單點 Scalar (Single Point)**: 1 timestamp → 1 field → 1 scalar value (e.g., 最簡單的 SCADA 數值)。完全支援。
+2. **多欄位 Flat Object**: 1 timestamp → N fields (e.g., EAP SV Report, MES Event)。完全支援，每個欄位可透過 `target_column` 映射到目的地或打包進 `details` JSONB。
+3. **陣列與複雜物件 (Array / Nested as Blob)**: 1 timestamp → 1 field → Array/JSON。MVP 階段支援將其定義為 `type: "json"` 並整包作為字串儲存，不執行展開 (Expand) 或聚合 (Aggregation)。
+
+#### 13.2 統一表與 Details 緩衝區
+所有非 `ts_telemetry` 的目標資料表（如 `ts_events`, `ts_alarms`, `ts_measurements`, `ts_status`）除了具備標準查詢欄位（如 `severity`, `code`）外，**必須包含 `details` (JSONB) 欄位**。
+任何無法對應到標準欄位的異質資料（如特定機台專有參數），都將被 Data Engine 打包存入 `details` 中，保留後續 SQL (JSONB operator) 的查詢彈性，避免修改 Database Schema。
 
 ### 13.5 Event Schema Type 範例
 
@@ -1073,7 +1474,7 @@ Schema Type: "Equipment_Event_Process"
   on_schema_mismatch: "log_and_store"
   on_new_field: "suggest"
   fields:
-    - name: "event_type"
+    - name: "event_code"
       type: "string"
       extract: true
       persist: true
@@ -1268,6 +1669,74 @@ Demo 4「問 AI」：Chat 問搬遷前後溫度差異 → AI 自動查 + 分析 
   但它需要 Demo 1-3 做基礎（沒有 UNS 就沒有標準化 API 給 AI 用）。
 ```
 
+### 14.6 AI Chat API 實作規格
+
+內建於平台的 AI 助手（§14 場景 4 的落地實作），透過 Gemini + MCP Tools 讓工程師用自然語言查詢工廠資料。
+
+#### 架構決策
+
+| 項目 | 決策 | 理由 |
+|---|---|---|
+| LLM Provider | Gemini（`google-genai` SDK） | 成本低、Function Calling 完整、架構預留 OpenAI 切換 |
+| MCP 呼叫方式 | In-process import（不走 subprocess） | PoC 階段簡化部署，MCP 函式本質上是 REST wrapper |
+| 無 API Key 時 | Mock 模式（仍呼叫真實 MCP Tools 回傳資料） | Demo 不需雲端依賴即可展示 |
+| Tool 迴圈上限 | 5 輪 | 防止無限 Tool Calling |
+
+#### POST /api/v1/ai/chat
+
+**Request：**
+
+```json
+{
+  "message": "列出 SMT 產線上所有的設備",
+  "history": [
+    { "role": "user", "content": "你好" },
+    { "role": "assistant", "content": "你好！我是 UNS AI 助手..." }
+  ]
+}
+```
+
+**Response：**
+
+```json
+{
+  "reply": "在 TaiwanPrecision/Taoyuan/SMT/Line1 下有以下設備...",
+  "tools_used": [
+    {
+      "name": "browse_namespace",
+      "args": { "path": "TaiwanPrecision/Taoyuan/SMT/Line1" },
+      "result": "{ ... }"
+    }
+  ]
+}
+```
+
+#### 可用 MCP Tools
+
+| Tool | 參數 | 說明 |
+|---|---|---|
+| `browse_namespace` | `path: str` | 瀏覽 Namespace 子節點（留空回傳根節點） |
+| `query_telemetry` | `tag_id: int, start?, end?, limit?` | 查詢 Tag 歷史時序資料 |
+| `get_latest_values` | `tag_ids: list[int]` | 批次查詢多個 Tag 的最新值 |
+
+#### System Prompt
+
+```
+你是 UNS Platform AI 助手。你可以使用以下工具查詢工廠資料：
+- browse_namespace: 瀏覽 Namespace 結構
+- query_telemetry: 查詢 Tag 歷史時序資料
+- get_latest_values: 查詢 Tag 最新值
+
+回答問題時，請依據工具回傳的實際資料回覆。使用繁體中文回覆。
+```
+
+#### 環境設定
+
+```
+# backend/.env
+gemini_api_key=your-api-key-here   # 留空 = Mock 模式
+```
+
 ---
 
 ## 15. MCP Server 設計
@@ -1381,3 +1850,58 @@ Phase 1（PoC）只做 3 個 Tools：
 | **MCP** | Model Context Protocol：讓 LLM Agent 標準化存取外部工具/資料的協議 |
 | **MCP Server** | UNS 平台的 MCP 介面，讓任何 LLM 都能查詢工廠資料 |
 | **AI-Ready** | 資料具有結構化目錄 + 語義化 metadata + 標準化 API，AI 可直接使用 |
+
+---
+
+## 17. 產品化與配置化路徑 (Roadmap)
+
+為了減少客製化開發工作量並提升平台的通用性，未來將朝向「全面配置化」發展。以下是核心規劃方向與實務場景範例。
+
+### 17.1 上下文作用域配置化 (Context Scope Configuration)
+
+目前 Data Engine 實作了「固定向上提升一級」的邏輯。產品化後，此行為將由 `uns_payload_schemas` 內的 `context_config` 物件定義。
+
+#### 配置與場景對照表：
+
+| Scope 設定 | 繼承邏輯 | 實務場景 (Business Case) |
+| :--- | :--- | :--- |
+| **`self`** | 事件僅對應觸發 Topic 所在的節點 | **獨立單機 (Stand-alone)**：如化學反應釜 (Reactor)，其生產批次僅與該設備關聯，不影響鄰近設備。 |
+| **`parent`** | 事件自動提升至直接父層 (預設) | **離散產線 (Assembly Line)**：如 SMT 線，Printer 啟動代表整條產線 (Line) 進入特定批次狀態。 |
+| **`ancestor:{N}`**| 向上跳 N 級作為文脈錨點 | **複雜工作中心 (Work Center)**：適合多層級包裝線，某個搬運站觸發後，影響整個「包裝區域 (Area)」。 |
+| **`root`** | 事件直接提升至 Namespace 根部 | **全廠能源監控 (Utility)**：如電力系統進入「尖峰時段」事件，全廠所有 Tag 自動繼承此狀態。 |
+
+#### 邏輯流程圖：
+```
+1. 收到 Event -> 解析出 lifecycle_trigger: "start"
+2. 讀取 Schema.context_config.scope
+3. IF scope == 'parent':
+     target_path = asset_path.parent()
+   ELSE:
+     target_path = asset_path
+4. 呼叫 API 註冊 target_path 的活躍批次
+```
+
+### 17.2 元數據驅動的業務引擎 (Metadata-driven Business Engine)
+
+未來 Data Engine 不應僅具備「搬運」能力，還應能透過 `master_data_codes.metadata` 驅動更複雜的邏輯。
+
+#### 1. 自動指令派發 (Action Trigger)
+- **概念**：當某個 Tag 值滿足條件時，自動觸發另一個 Topic 的指令。
+- **範例**：`metadata: {"on_value_match": {"99": "TRIGGER_ALARM"}}`。當 state 變成 99，Data Engine 主動對 Alarm Topic 寫入一筆資料。
+
+#### 2. 多重文脈關聯 (Multiple Contexts)
+- **需求**：有些量測值除了需要 `lot_id`，還需要 `tool_id` (模具 ID) 或 `operator_id`。
+- **規劃**：支援同時查詢多個活動中的 Context（如一個產線 Lot + 一個模具生命週期）。
+
+### 17.3 動態轉換與表達式引擎 (Transformation Engine)
+
+為了消除「機台資料不標籤（Untagged Data）」的問題，將在 Data Engine 整合輕量級運算。
+
+- **情境**：機台只發出數值 `0, 1, 2`。
+- **配置**：在 Schema 欄位中定義 `mapping: {0: "OFF", 1: "RUN", 2: "ALARM"}`。
+- **預期**：寫入 `ts_status.state_code` 前，自動完成語義轉換，讓分析端看到的永遠是可讀代碼。
+
+### 17.4 安全性與多租戶 (Security & Multi-tenancy)
+
+- **Row-level Security (RLS)**：在資料庫層級，根據 API 使用者的 `site_id` 自動過濾查詢結果。
+- **動態 ACL 同步**：Namespace 拖拉移動時，實時更新 MQTT Broker 的 ACL 規則，確保權限「隨路徑走」。

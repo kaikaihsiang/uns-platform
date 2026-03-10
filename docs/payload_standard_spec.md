@@ -268,7 +268,7 @@ def on_message(topic, payload_bytes):
     "quality": "good"
   },
   "data": {
-    "event_type": "inspection_complete",
+    "event_code": "inspection_complete",
     "event_id": "EVT-2024-0115-0042"
   }
 }
@@ -276,7 +276,7 @@ def on_message(topic, payload_bytes):
 
 | 欄位 | 必填 | 說明 |
 |---|---|---|
-| `event_type` | ✅ | 事件類型識別符（各系統自行定義） |
+| `event_code` | ✅ | 事件類型識別符（各系統自行定義） |
 | `event_id` | ✅ | 唯一事件 ID |
 | 其他欄位 | ⬡ | **自定義** — 依各系統需求自行加入 |
 
@@ -285,7 +285,7 @@ def on_message(topic, payload_bytes):
 ```json
 // Topic: .../QualityControl/Inspection1/AOI/Event/InspectionResult
 "data": {
-  "event_type": "inspection_complete",
+  "event_code": "inspection_complete",
   "event_id": "EVT-001",
   "board_serial": "PCB-001",
   "result": "NG",
@@ -294,7 +294,7 @@ def on_message(topic, payload_bytes):
 
 // Topic: .../SMT/Line1/Event/Changeover
 "data": {
-  "event_type": "changeover_complete",
+  "event_code": "changeover_complete",
   "event_id": "EVT-002",
   "from_product": "PCB-A001",
   "to_product": "PCB-B002",
@@ -640,7 +640,7 @@ message LotMoveInResponse {
     bool success = 1;          // true = ACK, false = NACK
     string lot_id = 2;
     string message = 3;
-    string error_code = 4;     // 失敗時的錯誤代碼
+    string alarm_code = 4;     // 失敗時的錯誤代碼
 }
 ```
 

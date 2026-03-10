@@ -161,7 +161,7 @@ tag_change_log                → 變更紀錄（audit）
 ts_telemetry                  → 數值感測（value DOUBLE）
 ts_status                     → 設備狀態（state TEXT）
 ts_alarms                     → 告警紀錄（severity, code, message）
-ts_events                     → 製程事件（event_type, details JSONB）
+ts_events                     → 製程事件（event_code, details JSONB）
 ts_metrics                    → 聚合指標（values JSONB）
 ```
 
@@ -704,7 +704,7 @@ def archive_expired_data(category: str, retention_days: int, config: dict):
 | 要求 | UNS 架構的對應機制 |
 |---|---|
 | **品質紀錄保留** | Event 和 Alarm 保留 ≥ 產品壽命 + 1 年（retention_policy.yaml 可配置） |
-| **產品 Traceability** | `ts_events` 表的 `event_type` + `details` JSONB 記錄每個批次的完整歷程 |
+| **產品 Traceability** | `ts_events` 表的 `event_code` + `details` JSONB 記錄每個批次的完整歷程 |
 | **SPC 數據** | `ts_telemetry` 的降取樣聚合（1min/1hr）提供長期趨勢分析 |
 | **8D 問題追溯** | Data Access Service 的 `QueryEvents` + `QueryAlarms` 提供時間範圍查詢 |
 | **供應商追溯** | MasterData category（透過 gRPC 同步）記錄物料批號來源 |
@@ -1775,53 +1775,49 @@ SEMI E10 定義了設備利用率的 6 大狀態。我們採用簡化版，適�
 ### 19.3 狀態枚舉定義
 
 ```sql
--- 設備狀態枚舉（加入 timeseries_schema.sql 或獨立執行）
+-- 系統核心代碼字典（加入 timeseries_schema.sql 或獨立執行）
 
-CREATE TABLE IF NOT EXISTS equipment_state_def (
-    state_code      INTEGER PRIMARY KEY,
-    state_name      TEXT NOT NULL UNIQUE,    -- 標準名稱
-    state_category  TEXT NOT NULL,           -- productive / standby / down / non_scheduled
-    oee_bucket      TEXT NOT NULL,           -- availability / performance / quality / excluded
+CREATE TABLE IF NOT EXISTS master_data_codes (
+    category        TEXT NOT NULL,
+    code_value      TEXT NOT NULL,    -- 標準名稱 (e.g. PRD, SBY)
+    label           TEXT NOT NULL,    -- Productive / Standby / Down 可讀名稱
+    metadata        JSONB,            -- oee_bucket, color 等額外資訊
     description     TEXT,
-    color           TEXT                     -- Dashboard 顯示顏色
+    PRIMARY KEY (category, code_value)
 );
 
-INSERT INTO equipment_state_def VALUES
-    -- PRODUCTIVE（生產中）→ 計入 OEE 的「運行時間」
-    (100, 'running',            'productive', 'availability', '正常加工中',               '#4CAF50'),
-    (101, 'loading_unloading',  'productive', 'availability', '上下料',                   '#8BC34A'),
-
-    -- STANDBY（待機）→ 降低 OEE Availability
-    (200, 'idle',               'standby',    'availability', '待機中，等待投料/指令',      '#FFC107'),
-    (201, 'setup_changeover',   'standby',    'availability', '換線/換模/換配方',           '#FF9800'),
-    (202, 'warmup',             'standby',    'availability', '預熱/穩定中',               '#FFB74D'),
-    (203, 'waiting_material',   'standby',    'availability', '等待物料',                   '#FFE082'),
-    (204, 'waiting_operator',   'standby',    'availability', '等待人員操作',               '#FFD54F'),
-
-    -- DOWN（停機）→ 降低 OEE Availability
-    (300, 'planned_maintenance','down',       'availability', '計畫保養',                   '#2196F3'),
-    (301, 'unplanned_down',     'down',       'availability', '非計畫停機（故障）',          '#F44336'),
-    (302, 'repair',             'down',       'availability', '維修中',                     '#E53935'),
-    (303, 'calibration',        'down',       'availability', '校正中',                     '#42A5F5'),
-
-    -- NON_SCHEDULED（排班外）→ 不計入 OEE
-    (400, 'non_scheduled',      'non_scheduled', 'excluded',  '非排班時間',                 '#9E9E9E'),
-    (401, 'holiday',            'non_scheduled', 'excluded',  '假日停工',                   '#BDBDBD'),
-    (402, 'engineering',        'non_scheduled', 'excluded',  '工程測試（不計入產能）',       '#7E57C2')
-
-ON CONFLICT (state_code) DO NOTHING;
+INSERT INTO master_data_codes (category, code_value, label, metadata, description) VALUES
+    ('equipment_state', 'PRD', 'Productive', '{"oee_bucket": "availability", "color": "#4CAF50"}', '正常加工中'),
+    ('equipment_state', 'SBY', 'Standby', '{"oee_bucket": "availability", "color": "#FFC107"}', '待機中/換線'),
+    ('equipment_state', 'ENG', 'Engineering', '{"oee_bucket": "excluded", "color": "#7E57C2"}', '工程測試/校正'),
+    ('equipment_state', 'UDT', 'Unscheduled Downtime', '{"oee_bucket": "availability", "color": "#F44336"}', '非計畫停機（故障/警報）'),
+    ('equipment_state', 'SDT', 'Scheduled Downtime', '{"oee_bucket": "availability", "color": "#2196F3"}', '計畫保養'),
+    ('equipment_state', 'NSC', 'Non-Scheduled', '{"oee_bucket": "excluded", "color": "#9E9E9E"}', '非排班時間')
+ON CONFLICT (category, code_value) DO NOTHING;
 ```
 
-### 19.4 修改 `ts_status` 表
+### 19.4 Data Engine 與 Master Data 的邊界 (ADR-005)
+
+**決策**：UNS Platform 的 Data Engine **絕對不負責**在資料攝取 (Ingestion) 過程中查詢 `master_data_codes` 進行代碼翻譯 (e.g. 將 `100` 翻譯成 `PRD`)。
+
+**背景與考量**：
+1. **效能瓶頸**：如果在每秒上萬筆的 Ingestion Pipeline 中加入 N+1 關聯式資料庫 Lookup，會劇烈拖垮 Data Engine 的吞吐量。
+2. **架構脆弱性**：若查無代碼，Data Engine 無法輕易決定是該丟棄此筆資料、存入 NULL、還是觸發警報，這將導致資料遺失或維運噩夢。
+3. **單一資料源 (SSOT) 衝突**：UNS 是 Data Hub，真正的 Master Data (如報警碼、設備狀態碼) 應該由 MES / CMMS / EAP 定義與維護。
+
+**實作規範**：
+*   **聰明的邊緣，笨的管線 (Smart Edge, Dumb Pipe)**：代碼值的轉換與標準化 (Mapping) 必須發生在寫入 MQTT 之前（即 Edge Gateway 或 EAP 中）。進入 MQTT 的 Payload 必須已經是符合 Schema 契約的標準代碼 (如 `PRD`, `SBY`)。
+*   **例外處理 (保留原始碼)**：若客戶要求保留機台原始代碼以利稽核，Schema 設計應利用多欄位（如 `{"state": "PRD", "raw_state_code": "100"}`）將兩者平鋪傳入，Data Engine 僅負責無腦寫入，不負責驗證兩者關聯。
+*   **Dict 的真實用途**：`master_data_codes` 定位為 **「讀取優化的字典 (Read-Only Dictionary)」**。它專供 OEE 分析引擎 (如計算 `oee_bucket`)、前端 Dashboard (解析 `color` 與 `label`)，或 API 消費者在「讀取時」 JOIN 使用。
+
+---
+
+### 19.5 修改 `ts_status` 表
 
 ```sql
--- 加上標準化的狀態碼（與現有 state_text 並存）
-ALTER TABLE ts_status
-    ADD COLUMN IF NOT EXISTS state_code INTEGER;
-
--- 索引：按狀態碼查（OEE 計算用）
-CREATE INDEX IF NOT EXISTS idx_status_code
-    ON ts_status(tag_id, state_code, time);
+-- 加上標準化的 state 索引
+CREATE INDEX IF NOT EXISTS idx_status_state
+    ON ts_status(tag_id, state, time);
 ```
 
 ### 19.5 Status Payload 格式更新
@@ -1858,16 +1854,16 @@ WITH state_durations AS (
     SELECT
         s.tag_id,
         DATE_TRUNC('day', s.time) AS day,
-        e.state_category,
-        e.oee_bucket,
+        e.label AS state_category,
+        e.metadata->>'oee_bucket' AS oee_bucket,
         -- 每筆狀態持續到下一筆為止
         EXTRACT(EPOCH FROM (
             LEAD(s.time) OVER (PARTITION BY s.tag_id ORDER BY s.time)
             - s.time
         )) AS duration_seconds
     FROM ts_status s
-    JOIN equipment_state_def e ON s.state_code = e.state_code
-    WHERE s.state_code IS NOT NULL
+    JOIN master_data_codes e ON s.state = e.code_value AND e.category = 'equipment_state'
+    WHERE s.state IS NOT NULL
 ),
 daily_summary AS (
     SELECT
@@ -1876,12 +1872,12 @@ daily_summary AS (
         -- 排班時間 = 全部時間 - non_scheduled
         SUM(duration_seconds) FILTER (WHERE oee_bucket = 'availability') AS scheduled_seconds,
         -- 生產時間 = productive
-        SUM(duration_seconds) FILTER (WHERE state_category = 'productive') AS productive_seconds,
+        SUM(duration_seconds) FILTER (WHERE state_category = 'Productive') AS productive_seconds,
         -- 停機時間 = down + standby
-        SUM(duration_seconds) FILTER (WHERE state_category = 'down') AS down_seconds,
-        SUM(duration_seconds) FILTER (WHERE state_category = 'standby') AS standby_seconds
+        SUM(duration_seconds) FILTER (WHERE state_category LIKE '%Downtime%') AS down_seconds,
+        SUM(duration_seconds) FILTER (WHERE state_category = 'Standby') AS standby_seconds
     FROM state_durations
-    WHERE oee_bucket != 'excluded'
+    WHERE (oee_bucket IS NULL OR oee_bucket != 'excluded')
     GROUP BY tag_id, day
 )
 SELECT

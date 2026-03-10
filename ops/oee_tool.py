@@ -48,31 +48,32 @@ def cmd_oee(conn, args):
                SELECT
                    s.tag_id,
                    DATE_TRUNC('day', s.time) AS day,
-                   e.state_name,
-                   e.state_category,
+                   e.label AS state_name,
+                   e.metadata->>'oee_bucket' AS oee_bucket,
+                   e.metadata->>'color' AS color,
                    EXTRACT(EPOCH FROM (
                        LEAD(s.time) OVER (PARTITION BY s.tag_id ORDER BY s.time) - s.time
                    )) AS duration_seconds
                FROM ts_status s
-               JOIN equipment_state_def e ON s.state_code = e.state_code
+               JOIN master_data_codes e ON s.state_code = e.code_value AND e.code_category = 'equipment_state'
                JOIN tags t ON s.tag_id = t.tag_id
-               WHERE t.asset_path = %s
+               WHERE t.asset_path LIKE %s
                  AND s.state_code IS NOT NULL
-                 AND s.time > NOW() - INTERVAL '%s days'
+                 AND s.time > NOW() - (%s * INTERVAL '1 day')
            )
            SELECT
                day::DATE,
                ROUND(SUM(duration_seconds) / 3600.0, 1) AS total_hours,
-               ROUND(SUM(duration_seconds) FILTER (WHERE state_category = 'productive') / 3600.0, 1) AS productive_hrs,
-               ROUND(SUM(duration_seconds) FILTER (WHERE state_category = 'standby') / 3600.0, 1) AS standby_hrs,
-               ROUND(SUM(duration_seconds) FILTER (WHERE state_category = 'down') / 3600.0, 1) AS down_hrs,
-               ROUND(100.0 * SUM(duration_seconds) FILTER (WHERE state_category = 'productive')
-                     / NULLIF(SUM(duration_seconds) FILTER (WHERE state_category != 'non_scheduled'), 0), 1) AS availability_pct
+               ROUND(SUM(duration_seconds) FILTER (WHERE oee_bucket = 'availability' AND state_name = 'Productive') / 3600.0, 1) AS productive_hrs,
+               ROUND(SUM(duration_seconds) FILTER (WHERE oee_bucket = 'availability' AND state_name = 'Standby') / 3600.0, 1) AS standby_hrs,
+               ROUND(SUM(duration_seconds) FILTER (WHERE oee_bucket = 'availability' AND state_name LIKE '%%Downtime%%') / 3600.0, 1) AS down_hrs,
+               ROUND(100.0 * SUM(duration_seconds) FILTER (WHERE oee_bucket = 'availability' AND state_name = 'Productive')
+                     / NULLIF(SUM(duration_seconds) FILTER (WHERE oee_bucket IS NULL OR oee_bucket != 'excluded'), 0), 1) AS availability_pct
            FROM state_durations
-           WHERE state_category != 'non_scheduled'
+           WHERE oee_bucket IS NULL OR oee_bucket != 'excluded'
            GROUP BY day
            ORDER BY day""",
-        (args.equipment, args.days)
+        (args.equipment + '%', args.days)
     )
 
     rows = cur.fetchall()
@@ -127,25 +128,26 @@ def cmd_ranking(conn, args):
                SELECT
                    t.asset_path,
                    t.display_name,
-                   e.state_category,
+                   e.label AS state_name,
+                   e.metadata->>'oee_bucket' AS oee_bucket,
                    EXTRACT(EPOCH FROM (
                        LEAD(s.time) OVER (PARTITION BY s.tag_id ORDER BY s.time) - s.time
                    )) AS duration_seconds
                FROM ts_status s
-               JOIN equipment_state_def e ON s.state_code = e.state_code
+               JOIN master_data_codes e ON s.state_code = e.code_value AND e.code_category = 'equipment_state'
                JOIN tags t ON s.tag_id = t.tag_id
                WHERE s.state_code IS NOT NULL
-                 AND s.time > NOW() - INTERVAL '%s days'
+                 AND s.time > NOW() - (%s * INTERVAL '1 day')
                  AND t.category = 'Status'
            )
            SELECT
                asset_path,
                display_name,
                ROUND(SUM(duration_seconds) / 3600.0, 1) AS total_hrs,
-               ROUND(SUM(duration_seconds) FILTER (WHERE state_category = 'productive') / 3600.0, 1) AS prod_hrs,
-               ROUND(SUM(duration_seconds) FILTER (WHERE state_category = 'down') / 3600.0, 1) AS down_hrs,
-               ROUND(100.0 * SUM(duration_seconds) FILTER (WHERE state_category = 'productive')
-                     / NULLIF(SUM(duration_seconds) FILTER (WHERE state_category != 'non_scheduled'), 0), 1) AS avail_pct
+               ROUND(SUM(duration_seconds) FILTER (WHERE state_name = 'Productive') / 3600.0, 1) AS prod_hrs,
+               ROUND(SUM(duration_seconds) FILTER (WHERE state_name LIKE '%Downtime%') / 3600.0, 1) AS down_hrs,
+               ROUND(100.0 * SUM(duration_seconds) FILTER (WHERE state_name = 'Productive')
+                     / NULLIF(SUM(duration_seconds) FILTER (WHERE oee_bucket IS NULL OR oee_bucket != 'excluded'), 0), 1) AS avail_pct
            FROM state_durations
            GROUP BY asset_path, display_name
            ORDER BY avail_pct DESC NULLS LAST""",
@@ -188,24 +190,23 @@ def cmd_downtime(conn, args):
 
     query = """WITH state_durations AS (
                SELECT
-                   e.state_name,
-                   e.state_category,
+                   e.label AS state_name,
                    e.description,
                    EXTRACT(EPOCH FROM (
                        LEAD(s.time) OVER (PARTITION BY s.tag_id ORDER BY s.time) - s.time
                    )) AS duration_seconds
                FROM ts_status s
-               JOIN equipment_state_def e ON s.state_code = e.state_code
+               JOIN master_data_codes e ON s.state_code = e.code_value AND e.code_category = 'equipment_state'
                JOIN tags t ON s.tag_id = t.tag_id
                WHERE s.state_code IS NOT NULL
-                 AND s.time > NOW() - INTERVAL '%s days'
-                 AND e.state_category IN ('down', 'standby')
+                 AND s.time > NOW() - (%s * INTERVAL '1 day')
+                 AND e.label IN ('Unscheduled Downtime', 'Scheduled Downtime', 'Standby')
            """
 
     params = [args.days]
     if args.equipment:
-        query += " AND t.asset_path = %s "
-        params.append(args.equipment)
+        query += " AND t.asset_path LIKE %s "
+        params.append(args.equipment + '%')
 
     query += """)
            SELECT
@@ -256,12 +257,11 @@ def cmd_status(conn, args):
         """SELECT DISTINCT ON (t.asset_path)
                t.asset_path,
                t.display_name,
-               e.state_name,
-               e.state_category,
-               e.color,
+               e.label AS state_name,
+               e.metadata->>'color' AS color,
                s.time
            FROM ts_status s
-           JOIN equipment_state_def e ON s.state_code = e.state_code
+           JOIN master_data_codes e ON s.state_code = e.code_value AND e.code_category = 'equipment_state'
            JOIN tags t ON s.tag_id = t.tag_id
            WHERE s.state_code IS NOT NULL
              AND t.category = 'Status'
@@ -279,23 +279,34 @@ def cmd_status(conn, args):
     print("  設備即時狀態概覽")
     print("=" * 80)
 
-    summary = {"productive": 0, "standby": 0, "down": 0, "non_scheduled": 0}
+    summary = {"Productive": 0, "Standby": 0, "Downtime": 0, "Engineering": 0, "Non-Scheduled": 0}
 
     for row in rows:
-        path, name, state, category, color, time = row
+        path, name, state, color, time = row
         short = path.split("/")[-1] if path else name
-        icon = {"productive": "🟢", "standby": "🟡",
-                "down": "🔴", "non_scheduled": "⚪"}.get(category, "⚪")
-        summary[category] += 1
+        
+        category = str(state) if state in summary else ("Downtime" if state and "Downtime" in str(state) else "Other")
+        
+        icon = "⚪"
+        if category == "Productive": icon = "🟢"
+        elif category == "Standby": icon = "🟡"
+        elif "Downtime" in category: icon = "🔴"
+        
+        cat_key = str(category)
+        if cat_key in summary:
+            summary[cat_key] += 1
+        else:
+            summary["Downtime"] += 1
+            
         print(f"  {icon} {short:<30s} {state:<22s}  since {time}")
 
     print()
     total = sum(summary.values())
     print(f"  📊 Total: {total}  |  "
-          f"🟢 Productive: {summary['productive']}  |  "
-          f"🟡 Standby: {summary['standby']}  |  "
-          f"🔴 Down: {summary['down']}  |  "
-          f"⚪ Off: {summary['non_scheduled']}")
+          f"🟢 Productive: {summary['Productive']}  |  "
+          f"🟡 Standby: {summary['Standby']}  |  "
+          f"🔴 Down: {summary['Downtime']}  |  "
+          f"⚪ Off: {summary['Non-Scheduled']}")
     print()
 
 
@@ -310,7 +321,7 @@ def main():
         "--db-url",
         default=os.environ.get(
             "UNS_DB_URL",
-            "postgresql://uns_reader:password@localhost:5432/uns_timeseries"
+            "postgresql://uns_admin:uns_dev_password@localhost:5432/uns_timeseries"
         ),
         help="TimescaleDB 連線字串"
     )

@@ -1,7 +1,7 @@
 """
 SQLAlchemy ORM Models — reflecting DB schema from docker/init-db/
 """
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import (
     Boolean,
@@ -21,6 +21,10 @@ class Base(DeclarativeBase):
     pass
 
 
+# ─── Production ────────────────────────────────────────────────
+
+from .production import ProductionRun
+
 # ─── Namespace ────────────────────────────────────────────────
 
 
@@ -34,28 +38,29 @@ class NamespaceNode(Base):
     full_path = Column(Text, nullable=False, unique=True)
 
     # Topic Node 專屬
-    schema_type_id = Column(Integer, ForeignKey("schema_types.type_id"), nullable=True)
+    schema_id = Column(Integer, ForeignKey("uns_payload_schemas.schema_id"), nullable=True)
     persist_mode = Column(Text, default="db")
     retention_days = Column(Integer, default=90)
 
     # Metadata
     description = Column(Text, nullable=True)
     icon = Column(Text, nullable=True)
-    created_at = Column(DateTime(timezone=True), default=datetime.now)
-    updated_at = Column(DateTime(timezone=True), default=datetime.now, onupdate=datetime.now)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     deleted_at = Column(DateTime(timezone=True), nullable=True)
     # NOTE: No ORM relationships — async SQLAlchemy + lazy loading = deadlock.
     #       Use explicit queries in service layer instead.
 
 
-# ─── Schema Types ─────────────────────────────────────────────
+# ─── UNS Payload Schemas ─────────────────────────────────────────────
 
 
-class SchemaType(Base):
-    __tablename__ = "schema_types"
+class UnsPayloadSchema(Base):
+    __tablename__ = "uns_payload_schemas"
 
-    type_id = Column(Integer, primary_key=True)
-    type_name = Column(Text, nullable=False, unique=True)
+    schema_id = Column(Integer, primary_key=True)
+    schema_name = Column(Text, nullable=False, unique=True)
+    schema_category = Column(Text, default="telemetry")
     decoder = Column(Text, default="json")
     timestamp_field = Column(Text, nullable=True)
     store_raw = Column(Boolean, default=True)
@@ -64,9 +69,12 @@ class SchemaType(Base):
     on_new_field = Column(Text, default="suggest")
     fields = Column(JSONB, nullable=False)
     status = Column(Text, default="confirmed")
+    is_suggested = Column(Boolean, default=False)
+    topic_pattern = Column(Text, nullable=True)
     version = Column(Integer, default=1)
-    created_at = Column(DateTime(timezone=True), default=datetime.now)
-    updated_at = Column(DateTime(timezone=True), default=datetime.now, onupdate=datetime.now)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
 
 
 # ─── Tags ─────────────────────────────────────────────────────
@@ -83,8 +91,9 @@ class Tag(Base):
     unit = Column(Text, nullable=True)
     data_type = Column(Text, nullable=False, default="float")
     description = Column(Text, nullable=True)
-    created_at = Column(DateTime(timezone=True), default=datetime.now)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     last_data_at = Column(DateTime(timezone=True), nullable=True)
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
 
 
 class TagSourceMapping(Base):
@@ -94,7 +103,7 @@ class TagSourceMapping(Base):
     tag_id = Column(Integer, ForeignKey("tags.tag_id"), nullable=False)
     mqtt_topic = Column(Text, nullable=False, unique=True)
     active = Column(Boolean, nullable=False, default=True)
-    mapped_at = Column(DateTime(timezone=True), default=datetime.now)
+    mapped_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     mapped_by = Column(Text, nullable=True)
     notes = Column(Text, nullable=True)
 
@@ -108,7 +117,7 @@ class TagChangeLog(Base):
     old_value = Column(Text, nullable=True)
     new_value = Column(Text, nullable=True)
     reason = Column(Text, nullable=True)
-    changed_at = Column(DateTime(timezone=True), default=datetime.now)
+    changed_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     changed_by = Column(Text, nullable=True)
 
 
@@ -125,6 +134,90 @@ class TsTelemetry(Base):
     value_text = Column(Text, nullable=True)
     value_json = Column(JSONB, nullable=True)
     quality = Column(Text, default="good")
+    run_id = Column(Integer, nullable=True)
+    lot_id = Column(Text, nullable=True)
+    step_id = Column(Text, nullable=True)
+
+
+class TsStatus(Base):
+    __tablename__ = "ts_status"
+
+    time = Column(DateTime(timezone=True), primary_key=True)
+    tag_id = Column(Integer, ForeignKey("tags.tag_id"), primary_key=True)
+    state_code = Column(Text, nullable=False)
+    sub_state_code = Column(Text, nullable=True)
+    code_category = Column(Text, nullable=True)
+    mode = Column(Text, nullable=True)
+    details = Column(JSONB, nullable=True)
+    run_id = Column(Integer, nullable=True)
+    lot_id = Column(Text, nullable=True)
+
+
+class TsAlarms(Base):
+    __tablename__ = "ts_alarms"
+
+    time = Column(DateTime(timezone=True), primary_key=True)
+    tag_id = Column(Integer, ForeignKey("tags.tag_id"), primary_key=True)
+    alarm_id = Column(Text, nullable=False)
+    alarm_code = Column(Text, nullable=False)
+    sub_alarm_code = Column(Text, nullable=True)
+    code_category = Column(Text, nullable=True)
+    severity = Column(Text, nullable=False)
+    message = Column(Text, nullable=True)
+    alarm_status = Column(Text, nullable=False)
+    value = Column(Float, nullable=True)
+    threshold = Column(Float, nullable=True)
+    details = Column(JSONB, nullable=True)
+    run_id = Column(Integer, nullable=True)
+    lot_id = Column(Text, nullable=True)
+
+
+class TsEvents(Base):
+    __tablename__ = "ts_events"
+
+    time = Column(DateTime(timezone=True), primary_key=True)
+    tag_id = Column(Integer, ForeignKey("tags.tag_id"), primary_key=True)
+    event_id = Column(Text, nullable=False)
+    event_code = Column(Text, nullable=False)
+    sub_event_code = Column(Text, nullable=True)
+    code_category = Column(Text, nullable=True)
+    result = Column(Text, nullable=True)
+    details = Column(JSONB, nullable=True)
+    run_id = Column(Integer, nullable=True)
+    lot_id = Column(Text, nullable=True)
+
+
+class TsMetrics(Base):
+    __tablename__ = "ts_metrics"
+
+    time = Column(DateTime(timezone=True), primary_key=True)
+    tag_id = Column(Integer, ForeignKey("tags.tag_id"), primary_key=True)
+    metric_category = Column(Text, nullable=False)
+    metric_code = Column(Text, nullable=False)
+    sub_metric_code = Column(Text, nullable=True)
+    period = Column(Text, nullable=True)
+    values = Column(JSONB, nullable=False)
+    context = Column(JSONB, nullable=True)
+    details = Column(JSONB, nullable=True)
+    run_id = Column(Integer, nullable=True)
+    lot_id = Column(Text, nullable=True)
+
+
+class TsMeasurements(Base):
+    __tablename__ = "ts_measurements"
+
+    time = Column(DateTime(timezone=True), primary_key=True)
+    tag_id = Column(Integer, ForeignKey("tags.tag_id"), primary_key=True)
+    value = Column(Float, nullable=True)
+    spec_upper = Column(Float, nullable=True)
+    spec_lower = Column(Float, nullable=True)
+    target_value = Column(Float, nullable=True)
+    result = Column(Text, nullable=True)
+    sample_id = Column(Text, nullable=True)
+    sample_position = Column(Text, nullable=True)
+    inspector = Column(Text, nullable=True)
+    context = Column(JSONB, nullable=True)
+    details = Column(JSONB, nullable=True)
     run_id = Column(Integer, nullable=True)
     lot_id = Column(Text, nullable=True)
     step_id = Column(Text, nullable=True)

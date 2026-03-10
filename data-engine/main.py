@@ -15,6 +15,7 @@ import psycopg2
 from src.config import Config
 from src.consumer import MQTTConsumer
 from src.pipeline import Pipeline
+from src.db_pool import DBPool
 
 # ── Logging 設定 ──────────────────────────────────────────────
 
@@ -35,15 +36,9 @@ async def main():
     logger.info("Batch size: %d, interval: %.1fs", Config.BATCH_SIZE, Config.BATCH_INTERVAL_SEC)
     logger.info("Deadband: %s", "enabled" if Config.DEADBAND_ENABLED else "disabled")
 
-    # ── 連接 DB ──
-    logger.info("Connecting to TimescaleDB...")
-    try:
-        db_conn = psycopg2.connect(**Config.db_dsn())
-        db_conn.autocommit = False
-        logger.info("TimescaleDB connected")
-    except psycopg2.Error as e:
-        logger.error("Cannot connect to TimescaleDB: %s", e)
-        sys.exit(1)
+    # ── 初始化 DB Pool ──
+    logger.info("Initializing DB connection pool...")
+    db_pool = DBPool()
 
     # ── Bootstrap window ──
     bootstrap_until = datetime.now(timezone.utc) + timedelta(
@@ -53,7 +48,7 @@ async def main():
 
     # ── 建立 Pipeline ──
     pipeline = Pipeline(
-        db_conn=db_conn,
+        db_pool=db_pool,
         bootstrap_until=bootstrap_until,
     )
 
@@ -77,8 +72,8 @@ async def main():
     except Exception as e:
         logger.error("Consumer failed: %s", e, exc_info=True)
     finally:
-        db_conn.close()
-        logger.info("Database connection closed")
+        db_pool.close()
+        logger.info("Database connection pool closed")
         logger.info("UNS Data Engine stopped")
 
 

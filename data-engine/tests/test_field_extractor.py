@@ -95,7 +95,7 @@ class TestFieldExtractor:
             full_path="Test/Site/Line1/Printer/Telemetry",
             persist_mode="db",
             retention_days=90,
-            schema_type_id=1,
+            schema_id=1,
             timestamp_field=timestamp_field,
             fields=[FieldDef(**f) for f in fields],
         )

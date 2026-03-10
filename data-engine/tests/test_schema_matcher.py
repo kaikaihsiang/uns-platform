@@ -17,8 +17,8 @@ class TestSchemaMatcher:
                 full_path="TestEnt/TestSite/Area1/Line1/Printer/Telemetry",
                 persist_mode="db",
                 retention_days=90,
-                schema_type_id=1,
-                type_name="SMT_Printer_Telemetry",
+                schema_id=1,
+                schema_name="SMT_Printer_Telemetry",
                 decoder="json",
                 timestamp_field="$._meta.timestamp",
                 store_raw=True,
@@ -34,8 +34,8 @@ class TestSchemaMatcher:
                 full_path="TestEnt/TestSite/Area1/Line1/Printer/Status",
                 persist_mode="retain",
                 retention_days=30,
-                schema_type_id=2,
-                type_name="Equipment_Status",
+                schema_id=2,
+                schema_name="Equipment_Status",
                 decoder="json",
                 store_raw=False,
             ),
@@ -52,7 +52,7 @@ class TestSchemaMatcher:
         result = self.matcher.match("TestEnt/TestSite/Area1/Line1/Printer/Telemetry")
         assert result is not None
         assert result.node_id == 1
-        assert result.type_name == "SMT_Printer_Telemetry"
+        assert result.schema_name == "SMT_Printer_Telemetry"
         assert result.persist_mode == "db"
         assert len(result.fields) == 2
 

@@ -323,12 +323,12 @@ class TimeSeriesWriter:
 
     def _write_event(self, topic, parsed, timestamp, data):
         tag_id = self.tags.get_tag_id(topic, parsed, data_type="json")
-        details = {k: v for k, v in data.items() if k not in ("event_id", "event_type", "result")}
+        details = {k: v for k, v in data.items() if k not in ("event_id", "event_code", "result")}
         cur = self.db.cursor()
         cur.execute(
-            """INSERT INTO ts_events (time, tag_id, event_id, event_type, result, details)
+            """INSERT INTO ts_events (time, tag_id, event_id, event_code, result, details)
                VALUES (%s,%s,%s,%s,%s,%s)""",
-            (timestamp, tag_id, data.get("event_id", ""), data.get("event_type", ""),
+            (timestamp, tag_id, data.get("event_id", ""), data.get("event_code", ""),
              data.get("result"), Json(details) if details else None)
         )
         self.db.commit()

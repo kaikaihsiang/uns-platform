@@ -1,7 +1,7 @@
 ---
 name: industrial-domain-expert
 description: >
-  UNS Platform industrial domain expert. Provides manufacturing domain
+  UNS Platform industrial domain expert (IBM/Accenture/TSMC/Yokogawa/Smart Manufacturing/MES/SCADA/PLC/OEE/SPC/CMMS/QMS/RMS/FDC/ERP/IIOT). Provides manufacturing domain
   knowledge: ISA-95/88, production context, SPC/OEE, equipment state model,
   event topic design, and target industry specifics. Uses industrial-domain
   and uns-namespace-design skills.

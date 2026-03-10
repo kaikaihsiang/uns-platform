@@ -143,11 +143,14 @@ CREATE INDEX IF NOT EXISTS idx_ts_telemetry_tag ON ts_telemetry(tag_id, time DES
 -- ═══════════════════════════════════════════════════════════════
 
 CREATE TABLE IF NOT EXISTS ts_status (
-    time        TIMESTAMPTZ NOT NULL,
-    tag_id      INTEGER NOT NULL REFERENCES tags(tag_id),
-    state       TEXT NOT NULL,               -- 'running'/'idle'/'changeover'/'maintenance'/'fault'/'offline'
-    sub_state   TEXT,
-    mode        TEXT                         -- 'auto' / 'manual' / 'semi_auto'
+    time            TIMESTAMPTZ NOT NULL,
+    tag_id          INTEGER NOT NULL REFERENCES tags(tag_id),
+    state           TEXT NOT NULL,               -- Primary state code
+    sub_state       TEXT,                        -- Secondary/detailed state
+    code_category   TEXT,                        -- Enrichment context category
+    mode            TEXT,                        -- 'auto', 'manual', etc.
+    run_id          INTEGER,
+    lot_id          TEXT
 );
 
 SELECT create_hypertable('ts_status', 'time', if_not_exists => TRUE);
@@ -159,15 +162,19 @@ CREATE INDEX IF NOT EXISTS idx_ts_status_tag ON ts_status(tag_id, time DESC);
 -- ═══════════════════════════════════════════════════════════════
 
 CREATE TABLE IF NOT EXISTS ts_alarms (
-    time        TIMESTAMPTZ NOT NULL,
-    tag_id      INTEGER NOT NULL REFERENCES tags(tag_id),
-    alarm_id    TEXT NOT NULL,
-    code        TEXT NOT NULL,
-    severity    TEXT NOT NULL,               -- 'info' / 'warning' / 'critical' / 'emergency'
-    message     TEXT,
-    state       TEXT NOT NULL,               -- 'active' / 'cleared' / 'shelved'
-    value       DOUBLE PRECISION,
-    threshold   DOUBLE PRECISION
+    time            TIMESTAMPTZ NOT NULL,
+    tag_id          INTEGER NOT NULL REFERENCES tags(tag_id),
+    alarm_id        TEXT NOT NULL,
+    code            TEXT NOT NULL,           -- Primary alarm code
+    sub_code        TEXT,                    -- Secondary/detailed code
+    code_category   TEXT,                    -- Enrichment context category
+    severity        TEXT NOT NULL,           -- 'info' / 'warning' / 'critical' / 'emergency'
+    message         TEXT,
+    state           TEXT NOT NULL,           -- 'active' / 'cleared' / 'shelved'
+    run_id          INTEGER,
+    lot_id          TEXT,
+    value           DOUBLE PRECISION,
+    threshold       DOUBLE PRECISION
 );
 
 SELECT create_hypertable('ts_alarms', 'time', if_not_exists => TRUE);
@@ -180,17 +187,21 @@ CREATE INDEX IF NOT EXISTS idx_ts_alarms_severity ON ts_alarms(severity, time DE
 -- ═══════════════════════════════════════════════════════════════
 
 CREATE TABLE IF NOT EXISTS ts_events (
-    time        TIMESTAMPTZ NOT NULL,
-    tag_id      INTEGER NOT NULL REFERENCES tags(tag_id),
-    event_id    TEXT NOT NULL,
-    event_type  TEXT NOT NULL,
-    result      TEXT,
-    details     JSONB
+    time            TIMESTAMPTZ NOT NULL,
+    tag_id          INTEGER NOT NULL REFERENCES tags(tag_id),
+    event_id        TEXT NOT NULL,
+    event           TEXT NOT NULL,           -- Primary event type
+    sub_event       TEXT,                    -- Secondary/detailed type
+    code_category   TEXT,                    -- Enrichment context category
+    result          TEXT,
+    run_id          INTEGER,
+    lot_id          TEXT,
+    details         JSONB
 );
 
 SELECT create_hypertable('ts_events', 'time', if_not_exists => TRUE);
 CREATE INDEX IF NOT EXISTS idx_ts_events_tag ON ts_events(tag_id, time DESC);
-CREATE INDEX IF NOT EXISTS idx_ts_events_type ON ts_events(event_type, time DESC);
+CREATE INDEX IF NOT EXISTS idx_ts_events_type ON ts_events(event_code, time DESC);
 
 
 -- ═══════════════════════════════════════════════════════════════

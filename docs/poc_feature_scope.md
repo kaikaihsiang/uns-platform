@@ -1,8 +1,9 @@
-# UNS Platform — PoC Feature Scope
+# UNS Platform — Phase 1 (PoC) Feature Scope
 
-> **目標**：定義 PoC 的 8 個功能邊界與驗收標準。
-> 各 Agent 開始工作前必須先讀這份文件，確認「PoC 只做這些」。
-> **預計時程**：4-6 週
+> **文件定位**：這是專案初期的 **Phase 1 (PoC)** 功能邊界與驗收標準。
+> **狀態**：此階段的核心功能（F1~F8）已大致完成。
+> **下一步**：為達成更進階的場景，請參閱 👉 `docs/mvp_task_delegation.md` (Phase 2 MVP 任務交辦計畫)。
+> 各 Agent 開發 PoC 相關功能或除錯時，必須參考此文件確認邊界。
 
 ---
 

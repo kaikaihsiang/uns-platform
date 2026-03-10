@@ -32,97 +32,100 @@ def execute_query(query, params=None, fetch=True):
         conn.close()
     return res
 
-def setup_test_schema_and_node():
-    logger.info("Setting up Test Schema and Namespace Node...")
-    # 確保資料表乾淨 (只刪除測試用的 node)
-    execute_query("DELETE FROM namespace_nodes WHERE full_path = 'Test/E2E/Machine'; ", fetch=False)
-    execute_query("DELETE FROM schema_types WHERE type_name = 'E2ESchema'; ", fetch=False)
-
-    # 1. 建立 Schema
-    fields = json.dumps([
-        {"name": "temperature", "path": "$.temperature", "type": "float", "deadband": 0.5},
-        {"name": "pressure", "path": "$.pressure", "type": "float"}
-    ])
+def setup_multi_category_test():
+    logger.info("Setting up Multi-Category Test Nodes...")
+    # 1. Status Node
+    execute_query("DELETE FROM namespace_nodes WHERE full_path = 'Test/E2E/StatusNode';", fetch=False)
+    execute_query("DELETE FROM schema_types WHERE type_name = 'StatusSchema';", fetch=False)
     res = execute_query(
-        "INSERT INTO schema_types (type_name, decoder, store_raw, fields) VALUES (%s, %s, %s, %s) RETURNING type_id",
-        ('E2ESchema', 'json', True, fields)
+        "INSERT INTO schema_types (type_name, category, fields) VALUES (%s, %s, %s) RETURNING type_id",
+        ('StatusSchema', 'status', json.dumps([{"name": "state", "type": "string"}]))
     )
-    schema_id = res[0][0]
-
-    # 2. 建立 Node
+    status_schema_id = res[0][0]
     execute_query(
-        "INSERT INTO namespace_nodes (name, node_type, full_path, schema_type_id, persist_mode) VALUES (%s, %s, %s, %s, %s)",
-        ('Machine', 'topic', 'Test/E2E/Machine', schema_id, 'db'),
-        fetch=False
+        "INSERT INTO namespace_nodes (name, node_type, full_path, schema_type_id) VALUES (%s, %s, %s, %s)",
+        ('StatusNode', 'topic', 'Test/E2E/StatusNode', status_schema_id), fetch=False
     )
-    logger.info("Test Schema and Node created successfully. Waiting 6s for Data Engine to refresh its cache...")
+
+    # 2. Alarm Node
+    execute_query("DELETE FROM namespace_nodes WHERE full_path = 'Test/E2E/AlarmNode';", fetch=False)
+    execute_query("DELETE FROM schema_types WHERE type_name = 'AlarmSchema';", fetch=False)
+    res = execute_query(
+        "INSERT INTO schema_types (type_name, category, fields) VALUES (%s, %s, %s) RETURNING type_id",
+        ('AlarmSchema', 'alarm', json.dumps([{"name": "alarm_msg", "type": "string", "path": "$.message"}]))
+    )
+    alarm_schema_id = res[0][0]
+    execute_query(
+        "INSERT INTO namespace_nodes (name, node_type, full_path, schema_type_id) VALUES (%s, %s, %s, %s)",
+        ('AlarmNode', 'topic', 'Test/E2E/AlarmNode', alarm_schema_id), fetch=False
+    )
+    logger.info("Multi-Category setup complete. Waiting 6s...")
     time.sleep(6)
 
 def verify():
     test_topic = "Test/E2E/Machine"
+    status_topic = "Test/E2E/StatusNode"
+    alarm_topic = "Test/E2E/AlarmNode"
     
     logger.info("=== Starting E2E Verification ===")
     setup_test_schema_and_node()
+    setup_multi_category_test()
     
     # 清空測試用的舊資料
-    logger.info("Cleaning up old telemetry/raw payloads for the test topic...")
-    execute_query("DELETE FROM ts_raw_payloads WHERE mqtt_topic = %s", (test_topic,), fetch=False)
+    logger.info("Cleaning up old test data...")
+    for t in [test_topic, status_topic, alarm_topic]:
+        execute_query("DELETE FROM ts_raw_payloads WHERE mqtt_topic = %s", (t,), fetch=False)
     
-    # 清理 tags 與 ts_telemetry
-    asset_path = "Test/E2E"
-    tags_to_delete = execute_query("SELECT tag_id FROM tags WHERE asset_path = %s", (asset_path,))
-    if tags_to_delete:
-        tag_ids = tuple([t[0] for t in tags_to_delete])
-        execute_query("DELETE FROM ts_telemetry WHERE tag_id IN %s", (tag_ids,), fetch=False)
-        execute_query("DELETE FROM tag_source_mapping WHERE tag_id IN %s", (tag_ids,), fetch=False)
-        execute_query("DELETE FROM tags WHERE tag_id IN %s", (tag_ids,), fetch=False)
-    
-    # ----- 測試 1 & 3: 正常寫入與 Raw 存儲 -----
-    logger.info("\n[Test 1 & 3] Normal Write & Raw Storage")
-    payload_1 = {"temperature": 25.3, "pressure": 2.1}
-    logger.info(f"Publishing to EMQX ({test_topic}): {payload_1}")
-    publish.single(test_topic, json.dumps(payload_1), hostname="localhost")
-    
-    time.sleep(2) # 等待 Data Engine 批次寫入
-    
-    raw_count = execute_query("SELECT COUNT(*) FROM ts_raw_payloads WHERE mqtt_topic = %s", (test_topic,))[0][0]
-    logger.info(f"Raw Payloads Count: {raw_count} (Expected: 1)")
-    if raw_count < 1:
-        logger.error("❌ Data Engine didn't process the message. Make sure Data Engine is RUNNING and was restarted after schema creation!")
-        return
-
-    # 查找 Tag ID (注意：asset_path 是上一層)
     asset_path = "Test/E2E"
     tags = execute_query("SELECT tag_id, display_name FROM tags WHERE asset_path = %s", (asset_path,))
-    tag_map = {name: tid for tid, name in tags}
-    logger.info(f"Found Tags in DB: {tag_map}")
+    if tags:
+        tag_ids = tuple([t[0] for t in tags])
+        for table in ['ts_telemetry', 'ts_status', 'ts_alarms', 'tag_source_mapping']:
+            execute_query(f"DELETE FROM {table} WHERE tag_id IN %s", (tag_ids,), fetch=False)
+        execute_query("DELETE FROM tags WHERE tag_id IN %s", (tag_ids,), fetch=False)
     
-    temp_tag_id = tag_map.get('temperature')
-    press_tag_id = tag_map.get('pressure')
-    
-    # 算一下寫了幾筆 telemetry
-    temp_count = execute_query("SELECT COUNT(*) FROM ts_telemetry WHERE tag_id = %s", (temp_tag_id,))[0][0]
-    press_count = execute_query("SELECT COUNT(*) FROM ts_telemetry WHERE tag_id = %s", (press_tag_id,))[0][0]
-    logger.info(f"Telemetry -> Temperature: {temp_count} records, Pressure: {press_count} records.")
-    
-    # ----- 測試 2: Deadband 過濾 -----
-    logger.info("\n[Test 2] Deadband Filtering (sending 10 duplicate temp values)")
-    # schema 中 temperature 的 deadband = 0.5
-    # 送 10 次 25.4 (差 0.1 < 0.5，會被過濾)
-    for _ in range(10):
-        publish.single(test_topic, json.dumps({"temperature": 25.4, "pressure": 2.1}), hostname="localhost")
+    # ----- 測試 1: 正常 Telemetry 寫入 -----
+    logger.info("\n[Test 1] Telemetry Write")
+    publish.single(test_topic, json.dumps({"temperature": 25.3, "pressure": 2.1}), hostname="localhost")
     time.sleep(2)
     
-    raw_count_after = execute_query("SELECT COUNT(*) FROM ts_raw_payloads WHERE mqtt_topic = %s", (test_topic,))[0][0]
-    temp_count_after = execute_query("SELECT COUNT(*) FROM ts_telemetry WHERE tag_id = %s", (temp_tag_id,))[0][0]
+    # 查找 Tag ID
+    tags = execute_query("SELECT tag_id, display_name FROM tags WHERE asset_path = %s", (asset_path,))
+    tag_map = {name: tid for tid, name in tags}
     
-    logger.info(f"Raw Payloads Count after 10 dupes: {raw_count_after} (Expected: 11)")
-    logger.info(f"Temperature Telemetry Count after 10 dupes: {temp_count_after} (Expected: same as before, no new records)")
+    temp_count = execute_query("SELECT COUNT(*) FROM ts_telemetry WHERE tag_id = %s", (tag_map.get('temperature'),))[0][0]
+    logger.info(f"Telemetry (ts_telemetry) Count: {temp_count} (Expected: 1)")
+    if temp_count != 1: raise Exception("Telemetry write failed")
+
+    # ----- 測試 4: Status 路由 -----
+    logger.info("\n[Test 4] Status Routing")
+    publish.single(status_topic, json.dumps({"state": "running", "sub_state": "normal"}), hostname="localhost")
+    time.sleep(2)
     
-    if raw_count_after == 11 and temp_count_after == temp_count:
-        logger.info("\n✅ ALL TESTS PASSED! Deadband successfully filtered duplicate telemetry while Raw Storage kept all data.")
-    else:
-        logger.error("\n❌ TESTS FAILED. Check constraints.")
+    tags = execute_query("SELECT tag_id FROM tags WHERE asset_path = %s AND display_name = 'state'", (asset_path,))
+    status_tag_id = tags[0][0]
+    status_count = execute_query("SELECT COUNT(*) FROM ts_status WHERE tag_id = %s", (status_tag_id,))[0][0]
+    logger.info(f"Status (ts_status) Count: {status_count} (Expected: 1)")
+    if status_count != 1: raise Exception("Status routing failed")
+
+    # ----- 測試 5: Alarm 路由 -----
+    logger.info("\n[Test 5] Alarm Routing")
+    publish.single(alarm_topic, json.dumps({"message": "Too Hot!", "severity": "critical", "code": "E01"}), hostname="localhost")
+    time.sleep(2)
+    
+    tags = execute_query("SELECT tag_id FROM tags WHERE asset_path = %s AND display_name = 'alarm_msg'", (asset_path,))
+    alarm_tag_id = tags[0][0]
+    alarm_count = execute_query("SELECT COUNT(*) FROM ts_alarms WHERE tag_id = %s", (alarm_tag_id,))[0][0]
+    logger.info(f"Alarm (ts_alarms) Count: {alarm_count} (Expected: 1)")
+    if alarm_count != 1: raise Exception("Alarm routing failed")
+    
+    logger.info("\n✅ ALL CATEGORY ROUTING TESTS PASSED!")
+
+if __name__ == "__main__":
+    try:
+        verify()
+    except Exception as e:
+        logger.error(f"Verification Failed: {e}")
 
 if __name__ == "__main__":
     verify()

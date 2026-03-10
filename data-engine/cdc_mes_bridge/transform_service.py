@@ -111,9 +111,9 @@ class TransformRules:
         area = row.get("area_id", "unknown")
         line = row.get("line_id", "unknown")
         equipment = row.get("equipment_id", "unknown")
-        event_type = row.get("event_type", "unknown")
+        event_code = row.get("event_code", "unknown")
 
-        topic = f"{self.prefix}/{area}/{line}/{equipment}/Event/{event_type}"
+        topic = f"{self.prefix}/{area}/{line}/{equipment}/Event/{event_code}"
 
         # 組 UNS 信封 payload
         payload = {
@@ -125,7 +125,7 @@ class TransformRules:
                 "quality": "good",
             },
             "data": {
-                "event_type": event_type,
+                "event_code": event_code,
                 "event_id": f"CDC-{row.get('event_id', uuid4())}",
                 "lot_id": row.get("lot_id"),
                 "equipment_id": row.get("equipment_id"),
@@ -214,7 +214,7 @@ class TransformRules:
                 "quality": "good",
             },
             "data": {
-                "event_type": "lot_state_change",
+                "event_code": "lot_state_change",
                 "event_id": f"CDC-LOT-{uuid4()}",
                 "lot_id": row.get("lot_id"),
                 "new_state": row.get("state"),

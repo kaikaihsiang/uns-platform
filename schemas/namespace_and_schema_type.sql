@@ -20,8 +20,8 @@
 -- 100 台同型設備 → 同一個 Schema Type。
 
 CREATE TABLE IF NOT EXISTS schema_types (
-    type_id            SERIAL PRIMARY KEY,
-    type_name          TEXT NOT NULL UNIQUE,       -- 'SMT_Printer_Telemetry'
+    schema_id          SERIAL PRIMARY KEY,
+    schema_name          TEXT NOT NULL UNIQUE,       -- 'SMT_Printer_Telemetry'
     decoder            TEXT DEFAULT 'json',         -- json / sparkplug / text_float / text_csv
     timestamp_field    TEXT,                        -- payload 中的時間戳欄位路徑，如 '$._meta.timestamp'
     store_raw          BOOLEAN DEFAULT true,        -- 是否同時存 raw payload
@@ -60,7 +60,7 @@ CREATE TABLE IF NOT EXISTS namespace_nodes (
     full_path       TEXT NOT NULL UNIQUE,         -- 'Enterprise/Site/Area/Line1/Printer/Telemetry'
 
     -- Topic Node 專屬（structural node 這些都是 NULL）
-    schema_type_id  INTEGER REFERENCES schema_types(type_id),
+    schema_id  INTEGER REFERENCES schema_types(schema_id),
     persist_mode    TEXT DEFAULT 'db',            -- db / retain / passthrough
     retention_days  INTEGER DEFAULT 90,
 
@@ -75,8 +75,8 @@ CREATE TABLE IF NOT EXISTS namespace_nodes (
 CREATE INDEX IF NOT EXISTS idx_ns_parent ON namespace_nodes(parent_id);
 CREATE INDEX IF NOT EXISTS idx_ns_full_path ON namespace_nodes(full_path);
 CREATE INDEX IF NOT EXISTS idx_ns_type ON namespace_nodes(node_type);
-CREATE INDEX IF NOT EXISTS idx_ns_schema ON namespace_nodes(schema_type_id)
-    WHERE schema_type_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_ns_schema ON namespace_nodes(schema_id)
+    WHERE schema_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_ns_active ON namespace_nodes(node_id)
     WHERE deleted_at IS NULL;
 

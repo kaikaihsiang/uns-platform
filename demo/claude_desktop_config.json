@@ -1,0 +1,13 @@
+{
+    "mcpServers": {
+        "uns-platform": {
+            "command": "python",
+            "args": [
+                "app/mcp_server.py"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/backend"
+            }
+        }
+    }
+}

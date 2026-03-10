@@ -1,8 +1,3 @@
--- =============================================================================
--- 04: Measurement + Equipment State
--- =============================================================================
--- 來源：schemas/measurement_and_state_schema.sql
-
 -- ─── Measurements（SPC 用）────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS ts_measurements (
@@ -19,7 +14,8 @@ CREATE TABLE IF NOT EXISTS ts_measurements (
     sample_id       TEXT,
     sample_position TEXT,
     inspector       TEXT,
-    context         JSONB
+    context         JSONB,
+    details         JSONB
 );
 
 SELECT create_hypertable('ts_measurements', 'time',
@@ -32,37 +28,46 @@ CREATE INDEX IF NOT EXISTS idx_meas_lot ON ts_measurements(lot_id, time) WHERE l
 CREATE INDEX IF NOT EXISTS idx_meas_run ON ts_measurements(run_id) WHERE run_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_meas_result ON ts_measurements(result, time) WHERE result != 'pass';
 
+COMMENT ON COLUMN ts_measurements.value IS '量測觀測值';
+COMMENT ON COLUMN ts_measurements.target_value IS '量測目標中心值 (用於 Cpk 計算)';
+COMMENT ON COLUMN ts_measurements.spec_upper IS '規格上限 (USL)';
+COMMENT ON COLUMN ts_measurements.spec_lower IS '規格下限 (LSL)';
+COMMENT ON COLUMN ts_measurements.result IS '判定結果 (pass/fail/warn)';
+COMMENT ON COLUMN ts_measurements.sample_id IS '樣本識別碼 (如板號、條碼)';
+COMMENT ON COLUMN ts_measurements.inspector IS '執行檢驗之人員或機台 ID';
 
--- ─── Equipment State Definition（E10 簡化版）─────────────────
 
-CREATE TABLE IF NOT EXISTS equipment_state_def (
-    state_code      INTEGER PRIMARY KEY,
-    state_name      TEXT NOT NULL UNIQUE,
-    state_category  TEXT NOT NULL,
-    oee_bucket      TEXT NOT NULL,
+-- ─── System Master Data Codes (Generic Dictionary) ───────────
+
+CREATE TABLE IF NOT EXISTS master_data_codes (
+    code_category   TEXT NOT NULL,
+    code_value      TEXT NOT NULL,
+    sub_code_value  TEXT NOT NULL DEFAULT '',
+    label           TEXT NOT NULL,
+    metadata        JSONB,
     description     TEXT,
-    color           TEXT
+    PRIMARY KEY (code_category, code_value, sub_code_value)
 );
 
-INSERT INTO equipment_state_def VALUES
-    (100, 'running',            'productive',     'availability', '正常加工中',         '#4CAF50'),
-    (101, 'loading_unloading',  'productive',     'availability', '上下料',             '#8BC34A'),
-    (200, 'idle',               'standby',        'availability', '待機中',             '#FFC107'),
-    (201, 'setup_changeover',   'standby',        'availability', '換線/換模/換配方',    '#FF9800'),
-    (202, 'warmup',             'standby',        'availability', '預熱/穩定中',         '#FFB74D'),
-    (203, 'waiting_material',   'standby',        'availability', '等待物料',            '#FFE082'),
-    (204, 'waiting_operator',   'standby',        'availability', '等待人員操作',        '#FFD54F'),
-    (300, 'planned_maintenance','down',           'availability', '計畫保養',            '#2196F3'),
-    (301, 'unplanned_down',     'down',           'availability', '非計畫停機（故障）',   '#F44336'),
-    (302, 'repair',             'down',           'availability', '維修中',              '#E53935'),
-    (303, 'calibration',        'down',           'availability', '校正中',              '#42A5F5'),
-    (400, 'non_scheduled',      'non_scheduled',  'excluded',     '非排班時間',           '#9E9E9E'),
-    (401, 'holiday',            'non_scheduled',  'excluded',     '假日停工',             '#BDBDBD'),
-    (402, 'engineering',        'non_scheduled',  'excluded',     '工程測試',             '#7E57C2')
-ON CONFLICT (state_code) DO NOTHING;
+COMMENT ON COLUMN master_data_codes.code_category IS '主數據類別 (如 equipment_state, alarm_code, production_lifecycle_code)';
+COMMENT ON COLUMN master_data_codes.code_value IS '主代碼 (如 PRD, UDT)';
+COMMENT ON COLUMN master_data_codes.sub_code_value IS '子代碼 (預設為空字串，用於層級化分類)';
+COMMENT ON COLUMN master_data_codes.label IS '顯示名稱/標籤';
+COMMENT ON COLUMN master_data_codes.metadata IS '額外元數據 (如 UI 顏色、計算權重)';
 
+INSERT INTO master_data_codes (code_category, code_value, sub_code_value, label, metadata, description) VALUES
+    ('equipment_state', 'PRD', '', 'Productive', '{"oee_bucket": "availability", "color": "#4CAF50"}', '正常加工中'),
+    ('equipment_state', 'SBY', '', 'Standby', '{"oee_bucket": "availability", "color": "#FFC107"}', '待機中/換線'),
+    ('equipment_state', 'ENG', '', 'Engineering', '{"oee_bucket": "excluded", "color": "#7E57C2"}', '工程測試/校正'),
+    ('equipment_state', 'UDT', '', 'Unscheduled Downtime', '{"oee_bucket": "availability", "color": "#F44336"}', '非計畫停機'),
+    ('equipment_state', 'UDT', 'E-VAC-LOSS', 'Vacuum Loss', '{"oee_bucket": "availability"}', '真空吸力不足 (故障細分)'),
+    ('equipment_state', 'SDT', '', 'Scheduled Downtime', '{"oee_bucket": "availability", "color": "#2196F3"}', '計畫保養'),
+    ('equipment_state', 'NSC', '', 'Non-Scheduled', '{"oee_bucket": "excluded", "color": "#9E9E9E"}', '非排班時間'),
+    ('metric_definition', 'OEE', '', 'Overall Equipment Effectiveness', '{"unit": "%"}', '設備綜合效率'),
+    ('production_lifecycle_code', 'LOT_START', '', 'Lot Start', '{"lifecycle_trigger": "start"}', '生產批次開始 (Metadata Trigger)'),
+    ('production_lifecycle_code', 'LOT_END', '', 'Lot End', '{"lifecycle_trigger": "end"}', '生產批次結束 (Metadata Trigger)')
+ON CONFLICT (category, code_value, sub_code_value) DO NOTHING;
 
--- ─── ts_status 加上 state_code ───────────────────────────────
+-- ─── ts_status Index on state ───────────────────────────────
 
-ALTER TABLE ts_status ADD COLUMN IF NOT EXISTS state_code INTEGER;
-CREATE INDEX IF NOT EXISTS idx_status_code ON ts_status(tag_id, state_code, time);
+CREATE INDEX IF NOT EXISTS idx_status_state ON ts_status(tag_id, state, time);

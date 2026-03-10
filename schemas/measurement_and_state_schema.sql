@@ -62,53 +62,41 @@ CREATE INDEX IF NOT EXISTS idx_meas_result
 
 
 -- ═══════════════════════════════════════════════════════════════
--- 2. Equipment State Definition（E10 簡化版）
+-- 2. System Master Data Codes (Generic Dictionary)
 -- ═══════════════════════════════════════════════════════════════
 
-CREATE TABLE IF NOT EXISTS equipment_state_def (
-    state_code      INTEGER PRIMARY KEY,
-    state_name      TEXT NOT NULL UNIQUE,
-    state_category  TEXT NOT NULL,               -- productive / standby / down / non_scheduled
-    oee_bucket      TEXT NOT NULL,               -- availability / excluded
-    description     TEXT,
-    color           TEXT                         -- Dashboard 顏色
+CREATE TABLE IF NOT EXISTS uns_payload_schemas (
+    schema_id          SERIAL PRIMARY KEY,
+    schema_name        TEXT NOT NULL UNIQUE,
+    schema_category    TEXT NOT NULL DEFAULT 'telemetry',
+    decoder            TEXT DEFAULT 'json',
+    timestamp_field    TEXT,                    -- JSONPath to timestamp in payload
+    store_raw          BOOLEAN DEFAULT true,
+    raw_retention_days INTEGER DEFAULT 30,
+    on_schema_mismatch TEXT DEFAULT 'log_and_store',
+    on_new_field       TEXT DEFAULT 'suggest',
+    fields             JSONB NOT NULL,          -- Array of field definitions
+    version            INTEGER DEFAULT 1,
+    created_at         TIMESTAMPTZ DEFAULT NOW(),
+    updated_at         TIMESTAMPTZ DEFAULT NOW()
 );
 
-INSERT INTO equipment_state_def VALUES
-    -- PRODUCTIVE（生產中）
-    (100, 'running',            'productive', 'availability', '正常加工中',               '#4CAF50'),
-    (101, 'loading_unloading',  'productive', 'availability', '上下料',                   '#8BC34A'),
-
-    -- STANDBY（待機）
-    (200, 'idle',               'standby',    'availability', '待機中',                    '#FFC107'),
-    (201, 'setup_changeover',   'standby',    'availability', '換線/換模/換配方',           '#FF9800'),
-    (202, 'warmup',             'standby',    'availability', '預熱/穩定中',               '#FFB74D'),
-    (203, 'waiting_material',   'standby',    'availability', '等待物料',                   '#FFE082'),
-    (204, 'waiting_operator',   'standby',    'availability', '等待人員操作',               '#FFD54F'),
-
-    -- DOWN（停機）
-    (300, 'planned_maintenance','down',       'availability', '計畫保養',                   '#2196F3'),
-    (301, 'unplanned_down',     'down',       'availability', '非計畫停機（故障）',          '#F44336'),
-    (302, 'repair',             'down',       'availability', '維修中',                     '#E53935'),
-    (303, 'calibration',        'down',       'availability', '校正中',                     '#42A5F5'),
-
-    -- NON_SCHEDULED（排班外）
-    (400, 'non_scheduled',      'non_scheduled', 'excluded',  '非排班時間',                 '#9E9E9E'),
-    (401, 'holiday',            'non_scheduled', 'excluded',  '假日停工',                   '#BDBDBD'),
-    (402, 'engineering',        'non_scheduled', 'excluded',  '工程測試',                   '#7E57C2')
-
-ON CONFLICT (state_code) DO NOTHING;
+INSERT INTO master_data_codes (code_category, code_value, label, metadata, description) VALUES
+    ('equipment_state', 'PRD', 'Productive', '{"oee_bucket": "availability", "color": "#4CAF50"}', '正常加工中'),
+    ('equipment_state', 'SBY', 'Standby', '{"oee_bucket": "availability", "color": "#FFC107"}', '待機中/換線'),
+    ('equipment_state', 'ENG', 'Engineering', '{"oee_bucket": "excluded", "color": "#7E57C2"}', '工程測試/校正'),
+    ('equipment_state', 'UDT', 'Unscheduled Downtime', '{"oee_bucket": "availability", "color": "#F44336"}', '非計畫停機（故障/警報）'),
+    ('equipment_state', 'SDT', 'Scheduled Downtime', '{"oee_bucket": "availability", "color": "#2196F3"}', '計畫保養'),
+    ('equipment_state', 'NSC', 'Non-Scheduled', '{"oee_bucket": "excluded", "color": "#9E9E9E"}', '非排班時間')
+ON CONFLICT (code_category, code_value) DO NOTHING;
 
 
 -- ═══════════════════════════════════════════════════════════════
--- 3. 修改 ts_status：加上標準化狀態碼
+-- 3. 修改 ts_status：加上 state 索引
 -- ═══════════════════════════════════════════════════════════════
 
-ALTER TABLE ts_status
-    ADD COLUMN IF NOT EXISTS state_code INTEGER;
-
-CREATE INDEX IF NOT EXISTS idx_status_code
-    ON ts_status(tag_id, state_code, time);
+CREATE INDEX IF NOT EXISTS idx_status_state
+    ON ts_status(tag_id, state, time);
 
 
 -- ═══════════════════════════════════════════════════════════════
@@ -120,14 +108,14 @@ WITH state_durations AS (
     SELECT
         s.tag_id,
         DATE_TRUNC('day', s.time) AS day,
-        e.state_category,
-        e.oee_bucket,
+        e.label AS state_category,
+        e.metadata->>'oee_bucket' AS oee_bucket,
         EXTRACT(EPOCH FROM (
             LEAD(s.time) OVER (PARTITION BY s.tag_id ORDER BY s.time) - s.time
         )) AS duration_seconds
     FROM ts_status s
-    JOIN equipment_state_def e ON s.state_code = e.state_code
-    WHERE s.state_code IS NOT NULL
+    JOIN master_data_codes e ON s.state = e.code_value AND e.code_category = 'equipment_state'
+    WHERE s.state IS NOT NULL
 ),
 daily_summary AS (
     SELECT
@@ -137,7 +125,7 @@ daily_summary AS (
         SUM(duration_seconds) FILTER (WHERE state_category = 'down') AS down_seconds,
         SUM(duration_seconds) FILTER (WHERE state_category = 'standby') AS standby_seconds
     FROM state_durations
-    WHERE oee_bucket != 'excluded'
+    WHERE (oee_bucket IS NULL OR oee_bucket != 'excluded')
     GROUP BY tag_id, day
 )
 SELECT
@@ -178,7 +166,7 @@ FROM ts_measurements m
 JOIN tags t ON m.tag_id = t.tag_id
 LEFT JOIN production_run r ON m.run_id = r.run_id
 GROUP BY t.data_point, r.product_id, r.lot_id, r.start_time::DATE
-ORDER BY r.start_time;
+ORDER BY r.start_time::DATE;
 
 
 -- ═══════════════════════════════════════════════════════════════
@@ -188,8 +176,8 @@ ORDER BY r.start_time;
 DO $$
 BEGIN
     RAISE NOTICE '✅ ts_measurements 表已建立';
-    RAISE NOTICE '✅ equipment_state_def 表已建立（14 種狀態）';
-    RAISE NOTICE '✅ ts_status 已加上 state_code';
+    RAISE NOTICE '✅ master_data_codes 表已建立';
+    RAISE NOTICE '✅ ts_status 已加上 state 索引';
     RAISE NOTICE '✅ equipment_oee view 已建立';
     RAISE NOTICE '✅ spc_summary view 已建立';
 END $$;

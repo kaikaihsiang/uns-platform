@@ -56,7 +56,7 @@ CREATE TABLE IF NOT EXISTS lot (
 -- 這張表是 CDC 的主要監聽目標
 CREATE TABLE IF NOT EXISTS event_tracking (
     event_id        SERIAL PRIMARY KEY,
-    event_type      TEXT NOT NULL,          -- 'lot_move_in' / 'lot_move_out' / 'recipe_change' / ...
+    event_code      TEXT NOT NULL,          -- 'lot_move_in' / 'lot_move_out' / 'recipe_change' / ...
     lot_id          TEXT,
     equipment_id    TEXT,
     line_id         TEXT,
@@ -69,7 +69,7 @@ CREATE TABLE IF NOT EXISTS event_tracking (
 
 -- 建索引：Transform Service 查詢用
 CREATE INDEX IF NOT EXISTS idx_event_tracking_time ON event_tracking(created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_event_tracking_type ON event_tracking(event_type);
+CREATE INDEX IF NOT EXISTS idx_event_tracking_type ON event_tracking(event_code);
 
 
 -- ═══ 配方表 ═══
@@ -123,7 +123,7 @@ BEGIN
     WHERE equipment_id = p_equipment_id;
 
     -- 寫 event tracking（MES 原本就會做的事）
-    INSERT INTO event_tracking (event_type, lot_id, equipment_id, line_id, area_id, operator_id, result)
+    INSERT INTO event_tracking (event_code, lot_id, equipment_id, line_id, area_id, operator_id, result)
     VALUES ('lot_move_in', p_lot_id, p_equipment_id, v_line_id, v_area_id, p_operator_id, 'OK');
 
     RETURN 'OK';
@@ -167,7 +167,7 @@ BEGIN
     WHERE equipment_id = v_equipment_id;
 
     -- 寫 event tracking
-    INSERT INTO event_tracking (event_type, lot_id, equipment_id, line_id, area_id, operator_id, result, details)
+    INSERT INTO event_tracking (event_code, lot_id, equipment_id, line_id, area_id, operator_id, result, details)
     VALUES ('lot_move_out', p_lot_id, v_equipment_id, v_line_id, v_area_id, p_operator_id, 'OK',
             jsonb_build_object('good_qty', p_good_qty, 'ng_qty', p_ng_qty,
                                'yield', round(p_good_qty::numeric / (p_good_qty + p_ng_qty), 4)));

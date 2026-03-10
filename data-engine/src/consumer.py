@@ -56,8 +56,10 @@ class MQTTConsumer:
         # 啟動定期 flush
         flush_task = asyncio.create_task(self._periodic_flush(stop_event))
 
-        # 等待停止信號
-        await stop_event.wait()
+        # 等待停止信號 (修正：確保這這裡會阻塞直到收到停止信號)
+        logger.info("MQTT Consumer is running. Waiting for stop signal...")
+        while not stop_event.is_set():
+            await asyncio.sleep(1)
 
         # 停止
         flush_task.cancel()
@@ -86,6 +88,7 @@ class MQTTConsumer:
             logger.info("Disconnected from MQTT broker")
 
     def _on_message(self, client, topic, payload, qos, properties):
+        print(f"RAW_MQTT_MSG: topic={topic}")
         """收到訊息，交給 Pipeline 處理。"""
         self._message_count += 1
         receive_time = datetime.now(timezone.utc)

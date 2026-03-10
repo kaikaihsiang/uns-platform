@@ -17,6 +17,12 @@ async def get_namespace_tree(db: AsyncSession = Depends(get_db)):
     return await namespace_service.get_tree_nested(db)
 
 
+@router.get("/nodes", response_model=list[NodeOut])
+async def get_nodes(db: AsyncSession = Depends(get_db)):
+    """取得所有 Nodes 的平坦列表。"""
+    return await namespace_service.get_all_nodes(db)
+
+
 @router.post("/nodes", response_model=NodeOut, status_code=201)
 async def create_node(body: NodeCreate, db: AsyncSession = Depends(get_db)):
     """建立 Namespace Node（structural 或 topic）。"""
@@ -27,11 +33,41 @@ async def create_node(body: NodeCreate, db: AsyncSession = Depends(get_db)):
             name=body.name,
             node_type=body.node_type,
             description=body.description,
-            schema_type_id=body.schema_type_id,
+            schema_id=body.schema_id,
         )
         return node
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# ─── Recycle Bin (Feature 10 APIs) ────────────────────────────
+
+
+@router.get("/nodes/deleted", response_model=list[NodeOut])
+async def get_deleted_nodes(db: AsyncSession = Depends(get_db)):
+    """取得所有 Soft-deleted 的 Nodes (Recycle Bin)。"""
+    return await namespace_service.get_deleted_nodes(db)
+
+
+@router.put("/nodes/{node_id}/restore", response_model=NodeOut)
+async def restore_node(node_id: int, db: AsyncSession = Depends(get_db)):
+    """從資源回收桶還原 Node。"""
+    try:
+        return await namespace_service.restore_node(db, node_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.delete("/nodes/{node_id}/hard", status_code=204)
+async def hard_delete_node(node_id: int, db: AsyncSession = Depends(get_db)):
+    """徹底刪除 Node（包含所有子節點），從資料庫中抹除。"""
+    try:
+        await namespace_service.hard_delete_node(db, node_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+# ─── Node Management ──────────────────────────────────────────
 
 
 @router.put("/nodes/{node_id}/move", response_model=NodeOut)
@@ -59,6 +95,8 @@ async def delete_node(node_id: int, db: AsyncSession = Depends(get_db)):
         return await namespace_service.soft_delete_node(db, node_id)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+
 
 
 @router.put("/nodes/{node_id}/persistence", response_model=NodeOut)

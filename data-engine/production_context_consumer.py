@@ -388,16 +388,16 @@ class ContextEnricher:
 
     # ── MES 事件處理 ──────────────────────────────────────
 
-    def handle_mes_event(self, event_type: str, event: dict):
+    def handle_mes_event(self, event_code: str, event: dict):
         """
         處理 CDC 送來的 MES 事件。
 
         在 consumer_example.py 的 _write_event() 中，
-        如果 event_type 是 LotMoveIn / LotMoveOut，呼叫此方法。
+        如果 event_code 是 LotMoveIn / LotMoveOut，呼叫此方法。
         """
-        if event_type == "LotMoveIn":
+        if event_code == "LotMoveIn":
             self.run_cache.on_lot_move_in(event)
-        elif event_type == "LotMoveOut":
+        elif event_code == "LotMoveOut":
             self.run_cache.on_lot_move_out(event)
 
     # ── 模式 A：持續上傳 ─────────────────────────────────

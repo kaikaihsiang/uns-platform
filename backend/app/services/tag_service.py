@@ -1,7 +1,7 @@
 """
 Tag Service — Tag CRUD, auto mapping, and query
 """
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import select, desc, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -69,18 +69,53 @@ async def create_tag(
     return tag
 
 
+async def update_tag(db: AsyncSession, tag_id: int, **kwargs) -> Tag:
+    """
+    更新 Tag 並同步更新 MQTT topic (如果 category 或 data_point 改變)。
+    """
+    tag = await db.get(Tag, tag_id)
+    if not tag or tag.deleted_at is not None:
+        raise ValueError(f"Tag {tag_id} not found")
+
+    old_category = tag.category
+    old_data_point = tag.data_point
+
+    # Update Tag fields
+    for key, value in kwargs.items():
+        if value is not None:
+            setattr(tag, key, value)
+
+    # Audit log for tag update
+    log = TagChangeLog(
+        tag_id=tag_id,
+        change_type="update",
+        reason=f"Fields updated: {', '.join(kwargs.keys())}",
+        changed_by="api",
+    )
+    db.add(log)
+
+    await db.commit()
+    await db.refresh(tag)
+    return tag
+
+
 async def get_tag(db: AsyncSession, tag_id: int) -> Tag | None:
     """取得單一 Tag。"""
     return await db.get(Tag, tag_id)
 
 
-async def list_tags_by_path(db: AsyncSession, node_path: str) -> list[Tag]:
-    """取得某 asset_path 底下的所有 Tag（含子路徑）。"""
-    result = await db.execute(
-        select(Tag).where(
-            Tag.asset_path.like(f"{node_path}%")
-        ).order_by(Tag.asset_path, Tag.category, Tag.data_point)
-    )
+async def list_tags_by_path(db: AsyncSession, node_path: str, recursive: bool = False) -> list[Tag]:
+    """取得某 asset_path 底下的所有 Tag。"""
+    stmt = select(Tag).where(Tag.deleted_at == None)
+    
+    if recursive:
+        stmt = stmt.where(Tag.asset_path.like(f"{node_path}%"))
+    else:
+        stmt = stmt.where(Tag.asset_path == node_path)
+        
+    stmt = stmt.order_by(Tag.asset_path, Tag.category, Tag.data_point)
+    
+    result = await db.execute(stmt)
     return list(result.scalars().all())
 
 
@@ -175,3 +210,82 @@ async def get_values_by_topic(
 
     result = await db.execute(stmt)
     return list(result.scalars().all())
+
+
+# ═══════════════════════════════════════════════════════════════
+# Recycle Bin
+# ═══════════════════════════════════════════════════════════════
+
+
+async def soft_delete_tag(db: AsyncSession, tag_id: int) -> Tag:
+    """Soft delete Tag。"""
+    tag = await db.get(Tag, tag_id)
+    if not tag or tag.deleted_at is not None:
+        raise ValueError(f"Tag {tag_id} not found")
+
+    tag.deleted_at = datetime.now(timezone.utc)
+
+    # Audit log
+    log = TagChangeLog(
+        tag_id=tag.tag_id,
+        change_type="delete",
+        reason="Soft delete tag",
+        changed_by="api",
+    )
+    db.add(log)
+
+    await db.commit()
+    await db.refresh(tag)
+    return tag
+
+
+async def get_deleted_tags(db: AsyncSession) -> list[Tag]:
+    """取得所有 Soft-deleted 的 Tags。"""
+    result = await db.execute(
+        select(Tag)
+        .where(Tag.deleted_at != None)
+        .order_by(desc(Tag.deleted_at))
+    )
+    return list(result.scalars().all())
+
+
+async def restore_tag(db: AsyncSession, tag_id: int) -> Tag:
+    """從資源回收桶還原 Tag。"""
+    tag = await db.get(Tag, tag_id)
+    if not tag or tag.deleted_at is None:
+        raise ValueError(f"Deleted Tag {tag_id} not found")
+
+    tag.deleted_at = None
+
+    # Audit log
+    log = TagChangeLog(
+        tag_id=tag.tag_id,
+        change_type="restore",
+        reason="Restore tag from recycle bin",
+        changed_by="api",
+    )
+    db.add(log)
+
+    await db.commit()
+    await db.refresh(tag)
+    return tag
+
+
+async def hard_delete_tag(db: AsyncSession, tag_id: int) -> None:
+    """徹底抹除 Tag，包含所有 mappings、變更紀錄。"""
+    tag = await db.get(Tag, tag_id)
+    if not tag or tag.deleted_at is None:
+        raise ValueError(f"Deleted Tag {tag_id} not found")
+
+    # 1. 刪除相關 Mapping
+    await db.execute(
+        TagSourceMapping.__table__.delete().where(TagSourceMapping.tag_id == tag_id)
+    )
+    # 2. 刪除相關 Change log
+    await db.execute(
+        TagChangeLog.__table__.delete().where(TagChangeLog.tag_id == tag_id)
+    )
+    # 3. 不主動刪除 Telemetry 等關聯時序資料 (遵守保留策略與防禦全表掃描)
+
+    await db.delete(tag)
+    await db.commit()

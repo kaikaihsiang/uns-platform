@@ -23,6 +23,8 @@ class Config:
     DB_NAME: str = os.getenv("DB_NAME", "uns_timeseries")
     DB_USER: str = os.getenv("DB_USER", "uns_admin")
     DB_PASSWORD: str = os.getenv("DB_PASSWORD", "uns_dev_password")
+    DB_POOL_MIN: int = int(os.getenv("DB_POOL_MIN", "5"))
+    DB_POOL_MAX: int = int(os.getenv("DB_POOL_MAX", "20"))
 
     @classmethod
     def db_dsn(cls) -> dict:

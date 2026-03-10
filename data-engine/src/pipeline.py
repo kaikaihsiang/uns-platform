@@ -10,16 +10,28 @@ UNS Data Engine — Pipeline Orchestrator
 """
 
 import logging
-import sys
+import json
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Dict, Any
 
+import asyncio
+import httpx
+
+from .auto_detect import AutoDetector
 from .config import Config
+from .context_cache import ActiveRunCache
 from .deadband import DeadbandFilter
-from .db_writer import DBWriter, RawPayloadRecord, TelemetryRecord
+from .db_writer import (
+    DBWriter, RawPayloadRecord, TelemetryRecord,
+    StatusRecord, AlarmRecord, EventRecord,
+    MeasurementRecord, MetricsRecord
+)
 from .decoder import DecodeResult, get_decoder
 from .field_extractor import FieldExtractor
 from .schema_matcher import SchemaMatcher
+from .category_router import CategoryRouter
+from .master_data_cache import MasterDataCache
+from .db_pool import DBPool
 
 logger = logging.getLogger("uns.pipeline")
 
@@ -27,29 +39,36 @@ logger = logging.getLogger("uns.pipeline")
 class TagLookup:
     """
     Tag 查找：MQTT topic + field_name → tag_id。
-
-    啟動時從 DB 載入 tag_source_mapping 到記憶體。
-    未知 topic → 自動建立 tag + mapping。
     """
 
-    def __init__(self, db_conn=None):
-        self._db = db_conn
-        self._cache: dict[str, int] = {}  # "topic::field_name" → tag_id
-        if db_conn:
+    def __init__(self, db_pool: Optional[DBPool] = None):
+        self._db_pool = db_pool
+        self._cache: dict[str, tuple[int, str]] = {}
+        if db_pool:
             self._load_from_db()
 
     def _load_from_db(self):
-        """載入所有 active mapping。"""
-        cur = self._db.cursor()
+        """載入所有 active mapping，排除已軟刪除的 Tag。"""
+        if not self._db_pool:
+            return
+
         try:
-            cur.execute(
-                "SELECT mqtt_topic, tag_id FROM tag_source_mapping WHERE active = true"
-            )
-            for row in cur.fetchall():
-                self._cache[row[0]] = row[1]
-        finally:
-            cur.close()
-        logger.info("Tag cache loaded: %d active mappings", len(self._cache))
+            with self._db_pool.connection() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT m.mqtt_topic, m.tag_id, t.asset_path
+                    FROM tag_source_mapping m
+                    JOIN tags t ON m.tag_id = t.tag_id
+                    WHERE m.active = true AND t.deleted_at IS NULL
+                    """
+                )
+                for row in cur.fetchall():
+                    self._cache[row[0]] = (row[1], row[2])
+                cur.close()
+            logger.info("Tag cache loaded: %d active mappings", len(self._cache))
+        except Exception as e:
+            logger.error(f"Failed to load tag cache: {e}")
 
     def get_tag_id(
         self,
@@ -58,161 +77,142 @@ class TagLookup:
         asset_path: Optional[str] = None,
         unit: Optional[str] = None,
         data_type: str = "float",
-    ) -> int:
-        """
-        查找或建立 tag_id。
-
-        對於有 Schema Type 的 topic，每個 field 是獨立的 tag：
-          key = "Enterprise/Site/Line1/Printer/Telemetry::temperature"
-        """
+        schema_category: str = "Telemetry",
+    ) -> tuple[int, str]:
+        """查找或建立 tag_id。"""
         key = f"{topic}::{field_name}" if field_name else topic
 
         if key in self._cache:
             return self._cache[key]
 
-        if not self._db:
-            # 無 DB 連線（測試模式）→ 用 hash 生成 fake tag_id
+        target_asset_path = asset_path or topic
+
+        if not self._db_pool:
             fake_id = abs(hash(key)) % 1_000_000
-            self._cache[key] = fake_id
-            return fake_id
+            self._cache[key] = (fake_id, target_asset_path)
+            return (fake_id, target_asset_path)
 
-        # 查 DB
-        cur = self._db.cursor()
         try:
-            # 先查 mapping
-            cur.execute(
-                "SELECT tag_id FROM tag_source_mapping WHERE mqtt_topic = %s AND active = true",
-                (key,),
-            )
-            row = cur.fetchone()
-            if row:
-                self._cache[key] = row[0]
-                return row[0]
+            with self._db_pool.connection() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT m.tag_id, t.asset_path
+                    FROM tag_source_mapping m
+                    JOIN tags t ON m.tag_id = t.tag_id
+                    WHERE m.mqtt_topic = %s AND m.active = true AND t.deleted_at IS NULL
+                    """,
+                    (key,),
+                )
+                row = cur.fetchone()
+                if row:
+                    tag_id, asset_path = row[0], row[1]
+                    cur_upd = conn.cursor()
+                    try:
+                        cur_upd.execute("UPDATE tags SET last_data_at = NOW() WHERE tag_id = %s", (tag_id,))
+                        conn.commit()
+                    except: conn.rollback()
+                    finally: cur_upd.close()
 
-            # 自動建立 tag + mapping
-            display_name = field_name or topic.split("/")[-1]
-            cur.execute(
-                """INSERT INTO tags (display_name, asset_path, category, data_point, unit, data_type)
-                   VALUES (%s, %s, %s, %s, %s, %s)
-                   RETURNING tag_id""",
-                (
-                    display_name,
-                    asset_path or topic.rsplit("/", 1)[0] if "/" in topic else topic,
-                    "Telemetry",
-                    field_name,
-                    unit,
-                    data_type,
-                ),
-            )
-            tag_id = cur.fetchone()[0]
+                    self._cache[key] = (tag_id, asset_path)
+                    cur.close()
+                    return (tag_id, asset_path)
 
-            cur.execute(
-                """INSERT INTO tag_source_mapping (tag_id, mqtt_topic, mapped_by, notes)
-                   VALUES (%s, %s, %s, %s)""",
-                (tag_id, key, "data-engine-auto", "Auto-created by Data Engine"),
-            )
+                display_name = field_name or topic.split("/")[-1]
+                db_category = schema_category.capitalize() if schema_category else "Telemetry"
 
-            self._db.commit()
-            self._cache[key] = tag_id
-            logger.info("New tag created: %s → tag_id=%d", key, tag_id)
-            return tag_id
+                cur.execute(
+                    """INSERT INTO tags (display_name, asset_path, category, data_point, unit, data_type)
+                       VALUES (%s, %s, %s, %s, %s, %s)
+                       RETURNING tag_id""",
+                    (display_name, target_asset_path, db_category, field_name, unit, data_type),
+                )
+                tag_id = cur.fetchone()[0]
+
+                cur.execute(
+                    """INSERT INTO tag_source_mapping (tag_id, mqtt_topic, mapped_by, notes)
+                       VALUES (%s, %s, %s, %s)""",
+                    (tag_id, key, "data-engine-auto", "Auto-created by Data Engine"),
+                )
+
+                conn.commit()
+                cur.close()
+                self._cache[key] = (tag_id, target_asset_path)
+                logger.info("New tag created: %s → tag_id=%d (category: %s)", key, tag_id, db_category)
+                return (tag_id, target_asset_path)
 
         except Exception as e:
-            logger.error("Tag creation failed for %s: %s", key, e)
-            self._db.rollback()
+            logger.error("Tag lookup/creation failed for %s: %s", key, e)
             raise
-        finally:
-            cur.close()
 
     def refresh(self):
-        """重新載入 DB。"""
-        if self._db:
+        if self._db_pool:
             self._cache.clear()
             self._load_from_db()
 
 
 class Pipeline:
-    """
-    Data Engine Pipeline — 組裝所有元件。
-
-    使用方式：
-        pipeline = Pipeline(db_conn=conn)
-        pipeline.process(topic, payload_bytes, receive_time)
-    """
-
     def __init__(
         self,
-        db_conn=None,
+        db_pool: Optional[DBPool] = None,
         schema_matcher: Optional[SchemaMatcher] = None,
         tag_lookup: Optional[TagLookup] = None,
         db_writer: Optional[DBWriter] = None,
         deadband_filter: Optional[DeadbandFilter] = None,
         field_extractor: Optional[FieldExtractor] = None,
+        master_data_cache: Optional[MasterDataCache] = None,
         bootstrap_until: Optional[datetime] = None,
     ):
-        self._schema_matcher = schema_matcher or SchemaMatcher(db_conn)
-        self._tag_lookup = tag_lookup or TagLookup(db_conn)
+        self._db_pool = db_pool
+        self._schema_matcher = schema_matcher or SchemaMatcher(db_pool)
+        self._tag_lookup = tag_lookup or TagLookup(db_pool)
         self._db_writer = db_writer or (DBWriter(
-            db_conn,
+            db_pool,
             batch_size=Config.BATCH_SIZE,
             batch_interval_sec=Config.BATCH_INTERVAL_SEC,
-        ) if db_conn else None)
-        self._deadband = deadband_filter or DeadbandFilter(
-            enabled=Config.DEADBAND_ENABLED
-        )
+        ) if db_pool else None)
+        self._deadband = deadband_filter or DeadbandFilter(enabled=Config.DEADBAND_ENABLED)
         self._extractor = field_extractor or FieldExtractor()
         self._bootstrap_until = bootstrap_until
+        self._context_cache = ActiveRunCache(db_pool) if db_pool else None
+        self._master_data_cache = master_data_cache or MasterDataCache(db_pool)
+        self._auto_detector = AutoDetector(threshold=10)
+        self._category_router = CategoryRouter()
 
-        # 統計
         self._total_processed = 0
         self._total_skipped = 0
         self._total_passthrough = 0
         self._total_no_schema = 0
 
-    def process(
-        self,
-        topic: str,
-        payload_bytes: bytes,
-        receive_time: Optional[datetime] = None,
-    ):
-        """
-        處理一筆 MQTT 訊息。
-
-        Args:
-            topic: MQTT topic
-            payload_bytes: raw payload bytes
-            receive_time: 收到訊息的時間
-        """
+    def process(self, topic: str, payload_bytes: bytes, receive_time: Optional[datetime] = None):
         if receive_time is None:
             receive_time = datetime.now(timezone.utc)
 
         self._total_processed += 1
 
-        # Bootstrap mode：啟動期間不寫 DB（避免 retained message 重複寫）
         if self._bootstrap_until and receive_time < self._bootstrap_until:
             logger.debug("Bootstrap mode, skipping: %s", topic)
             self._total_skipped += 1
             return
 
-        # 1. Schema Matcher
         schema = self._schema_matcher.match(topic)
         if schema is None:
-            # 未註冊的 topic → 跳過（Phase 1 不做 auto-detect 寫入）
             self._total_no_schema += 1
-            logger.debug("No schema for topic: %s", topic)
+            try:
+                decoder = get_decoder("json")
+                result = decoder.decode(payload_bytes)
+                if result.ok and isinstance(result.data, dict):
+                    inferred = self._auto_detector.collect_sample(topic, result.data)
+                    if inferred:
+                        self._save_schema_suggestion(inferred)
+            except Exception as e:
+                logger.debug(f"Auto-detect decoding failed for {topic}: {e}")
             return
 
-        # 2. Persist Decision
-        if schema.persist_mode == "passthrough":
+        if schema.persist_mode in ("passthrough", "retain"):
             self._total_passthrough += 1
             return
 
-        if schema.persist_mode == "retain":
-            # PoC 階段不主動管 EMQX retain，只跳過 DB 寫入
-            self._total_passthrough += 1
-            return
-
-        # 3. Decode
         decoder = get_decoder(schema.decoder)
         result: DecodeResult = decoder.decode(payload_bytes)
         if not result.ok:
@@ -221,72 +221,234 @@ class Pipeline:
 
         payload = result.data
 
-        # 4. Raw Storage（Dual Storage）
         if schema.store_raw and self._db_writer:
             payload_size = len(payload_bytes) if payload_bytes else 0
             self._db_writer.add_raw_payload(RawPayloadRecord(
-                time=receive_time,
-                topic=topic,
-                payload=payload,
-                schema_type_id=schema.schema_type_id,
-                payload_size=payload_size,
+                time=receive_time, topic=topic, payload=payload,
+                schema_id=schema.schema_id, payload_size=payload_size
             ))
 
-        # 5. Field Extraction
-        if not schema.fields:
-            # 沒有 fields 定義 → 只存 raw
-            return
-
+        schema_category = self._category_router.resolve(schema)
         extracted_values = self._extractor.extract(payload, schema, receive_time)
 
-        # 6. Deadband + Write
-        for ev in extracted_values:
-            if not ev.persist:
-                continue
-
-            tag_id = self._tag_lookup.get_tag_id(
-                topic=topic,
-                field_name=ev.tag_suffix,
-                unit=ev.unit,
-                data_type=ev.field_type,
-            )
-
-            # Deadband check
-            check_value = ev.value if ev.value is not None else ev.value_text
-            if not self._deadband.should_write(tag_id, check_value, ev.deadband):
+        if schema_category == 'telemetry':
+            for ev in extracted_values:
+                if not ev.persist: continue
+                tag_id, asset_path = self._tag_lookup.get_tag_id(topic=topic, field_name=ev.tag_suffix, unit=ev.unit, data_type=ev.field_type, schema_category=schema_category)
+                if tag_id is None: continue
+                if not self._deadband.should_write(tag_id, ev.value if ev.value is not None else ev.value_text, ev.deadband): continue
+                run_id, lot_id = None, None
+                if self._context_cache:
+                    ctx = self._context_cache.get_active_run(asset_path)
+                    run_id = ctx['run_id'] if ctx else None
+                    lot_id = ctx['lot_id'] if ctx else None
+                if self._db_writer:
+                    self._db_writer.add_telemetry(TelemetryRecord(time=ev.timestamp, tag_id=tag_id, value=ev.value, value_text=ev.value_text, value_json=ev.value_json, quality='good', run_id=run_id, lot_id=lot_id))
+            self.flush()
+        else:
+            tag_id, asset_path = self._tag_lookup.get_tag_id(topic=topic, field_name="", schema_category=schema_category)
+            if tag_id is None:
                 self._total_skipped += 1
-                continue
+                return
+            
+            run_id, lot_id = None, None
+            if self._context_cache:
+                ctx = self._context_cache.get_active_run(asset_path)
+                run_id = ctx['run_id'] if ctx else None
+                lot_id = ctx['lot_id'] if ctx else None
 
+            target_kwargs, business_values, technical_details = {}, {}, {}
+            for ev in extracted_values:
+                val = ev.value if ev.value is not None else (ev.value_text if ev.value_text is not None else ev.value_json)
+                if ev.target_column:
+                    target_kwargs[ev.target_column] = val
+                elif getattr(ev, 'is_schema_defined', True):
+                    business_values[ev.tag_suffix] = val
+                else:
+                    technical_details[ev.tag_suffix] = val
+            
+            if not target_kwargs and not business_values and not technical_details: return
+            details = {**business_values, **technical_details}
+            
             if self._db_writer:
-                self._db_writer.add_telemetry(TelemetryRecord(
-                    time=ev.timestamp,
-                    tag_id=tag_id,
-                    value=ev.value,
-                    value_text=ev.value_text,
-                    value_json=ev.value_json,
-                    quality="good",
-                ))
+                if schema_category == "metrics":
+                    record = self._build_non_telemetry_record(schema_category, receive_time, tag_id, target_kwargs, technical_details, run_id, lot_id, schema, asset_path, business_values)
+                else:
+                    record = self._build_non_telemetry_record(schema_category, receive_time, tag_id, target_kwargs, details, run_id, lot_id, schema, asset_path)
+                if record:
+                    self._add_to_writer(schema_category, record)
+
+    def _build_non_telemetry_record(self, schema_category: str, receive_time: datetime, tag_id: int, target_kwargs: dict, details: dict, run_id: Optional[int] = None, lot_id: Optional[str] = None, schema: Any = None, asset_path: str = "", metrics_values: Optional[dict] = None):
+        import hashlib
+        def _generate_synthetic_id(prefix: str, seed_data: str) -> str:
+            h = hashlib.sha256(seed_data.encode()).hexdigest()[:8].upper()
+            return f"{prefix}-{h}"
+        def _safe_float(val, default=None):
+            if val is None: return default
+            try: return float(val)
+            except: return default
+        def _safe_str(val, default=""):
+            if val is None: return default
+            return str(val)
+
+        main_code = _safe_str(target_kwargs.get("state_code") or target_kwargs.get("alarm_code") or target_kwargs.get("event_code") or target_kwargs.get("metric_code"))
+        sub_code = _safe_str(target_kwargs.get("sub_state_code") or target_kwargs.get("sub_alarm_code") or target_kwargs.get("sub_event_code") or target_kwargs.get("sub_metric_code"))
+        provided_cat = _safe_str(target_kwargs.get("code_category") or target_kwargs.get("metric_category"))
+
+        discovered = self._master_data_cache.find_metadata(main_code, sub_code) if (main_code or sub_code) else None
+        final_cat = provided_cat or (discovered["code_category"] if discovered else None)
+        final_sub = sub_code or (discovered["sub_code"] if discovered else None)
+        metadata = discovered.get("metadata", {}) if discovered else {}
+
+        if schema_category == "status":
+            return StatusRecord(
+                time=receive_time, 
+                tag_id=tag_id, 
+                state_code=main_code or "STATE-CODE-UNKNOWN", 
+                sub_state_code=final_sub, 
+                code_category=final_cat or "STATE-CATEGORY-UNKNOWN", 
+                mode=target_kwargs.get("mode"), 
+                run_id=run_id, 
+                lot_id=lot_id, 
+                details=details if details else None
+                )
+        elif schema_category == "alarm":
+            alarm_id = target_kwargs.get("alarm_id") or details.get("alarm_id")
+            if not alarm_id:
+                alarm_id = _generate_synthetic_id("ALM", f"{tag_id}-{main_code}-{receive_time.isoformat()}")
+            return AlarmRecord(
+                time=receive_time, 
+                tag_id=tag_id, 
+                alarm_id=alarm_id, 
+                alarm_code=main_code or "ALM-CODE-UNKNOWN", 
+                sub_alarm_code=final_sub, 
+                code_category=final_cat or "ALARM-CATEGORY-UNKNOWN", 
+                severity=_safe_str(target_kwargs.get("severity"), metadata.get("severity", "warning")), 
+                message=_safe_str(target_kwargs.get("message")), 
+                alarm_status=_safe_str(target_kwargs.get("alarm_status")),
+                value=_safe_float(target_kwargs.get("value")), 
+                threshold=_safe_float(target_kwargs.get("threshold")), 
+                run_id=run_id, 
+                lot_id=lot_id, 
+                details=details if details else None
+                )
+        elif schema_category == "event":
+            trigger = metadata.get("lifecycle_trigger")
+            if trigger: self._dispatch_mes_event(trigger, target_kwargs, details, asset_path)
+            event_id = target_kwargs.get("event_id") or details.get("event_id")
+            if not event_id:
+                event_id = _generate_synthetic_id("EVT", f"{tag_id}-{main_code}-{receive_time.isoformat()}")
+            return EventRecord(
+                time=receive_time, 
+                tag_id=tag_id, 
+                event_id=event_id, 
+                event_code=main_code or "EVENT-CODE-UNKNOWN", 
+                sub_event_code=final_sub, 
+                code_category=final_cat or "EVENT-CATEGORY-UNKNOWN", 
+                result=_safe_str(target_kwargs.get("result")), 
+                run_id=run_id, 
+                lot_id=_safe_str(target_kwargs.get("lot_id")) if "lot_id" in target_kwargs else lot_id, 
+                details=details if details else None
+                )
+        elif schema_category == "measurement":
+            return MeasurementRecord(
+                time=receive_time, 
+                tag_id=tag_id, 
+                value=_safe_float(target_kwargs.get("value"), 0.0), 
+                spec_upper=_safe_float(target_kwargs.get("spec_upper")), 
+                spec_lower=_safe_float(target_kwargs.get("spec_lower")), 
+                target_value=_safe_float(target_kwargs.get("target_value")), 
+                result=_safe_str(target_kwargs.get("result")), 
+                run_id=run_id, 
+                lot_id=_safe_str(target_kwargs.get("lot_id")) if "lot_id" in target_kwargs else lot_id, 
+                step_id=_safe_str(target_kwargs.get("step_id")), 
+                sample_id=_safe_str(target_kwargs.get("sample_id") or target_kwargs.get("panel_id")), 
+                sample_position=_safe_str(target_kwargs.get("sample_position")), 
+                inspector=_safe_str(target_kwargs.get("inspector")), 
+                context=target_kwargs.get("context"), 
+                details=details if details else None
+                )
+        elif schema_category == "metrics":
+            return MetricsRecord(
+                time=receive_time, 
+                tag_id=tag_id, 
+                metric_category=final_cat or "METRIC-CATEGORY-UNKNOWN", 
+                metric_code=main_code or "METRIC-CODE-UNKNOWN", 
+                sub_metric_code=final_sub, 
+                period=_safe_str(target_kwargs.get("period")), 
+                values=target_kwargs.get("values") or metrics_values or {}, 
+                context=target_kwargs.get("context"), 
+                details=details if details else None
+                )
+
+    def _dispatch_mes_event(self, trigger_type: str, target_kwargs: dict, details: dict, asset_path: str):
+        logger.info(f"Dispatching Production Lifecycle Trigger: {trigger_type} for path {asset_path}")
+        api_url = "http://localhost:8000/api/v1/production-runs"
+        temp_path = asset_path
+        suffix_lower = temp_path.split("/")[-1].lower() if "/" in temp_path else ""
+        if suffix_lower in ("events", "telemetry", "status", "alarms", "measurements", "metrics"):
+            equipment_path = "/".join(temp_path.split("/")[:-1])
+        else:
+            equipment_path = temp_path
+        async def _call_api():
+            try:
+                if trigger_type == "start":
+                    payload = {
+                        "equipment_path": equipment_path, 
+                        "lot_id": target_kwargs.get("lot_id") or details.get("lot_id", "UNKNOWN_LOT"), 
+                        "step_id": target_kwargs.get("step_id") or details.get("step_id", "UNKNOWN_STEP"), 
+                        "recipe_id": target_kwargs.get("recipe_id") or details.get("recipe_id"), 
+                        "product_id": target_kwargs.get("product_id") or details.get("product_id"), 
+                        "context": details if details else {}
+                        }
+                    async with httpx.AsyncClient() as client:
+                        resp = await client.post(api_url + "/", json=payload, timeout=5.0)
+                        resp.raise_for_status()
+                        logger.info(f"Successfully STARTED Lot Context for {equipment_path}: {resp.json()}")
+                elif trigger_type == "end":
+                    if hasattr(self, "_context_cache") and self._context_cache:
+                        ctx = self._context_cache.get_active_run(equipment_path)
+                        if ctx and ctx.get("run_id"):
+                            run_id = ctx["run_id"]
+                            payload = {"status": "Completed", "context": details if details else {}}
+                            async with httpx.AsyncClient() as client:
+                                resp = await client.patch(f"{api_url}/{run_id}", json=payload, timeout=5.0)
+                                resp.raise_for_status()
+                                logger.info(f"Successfully ENDED Lot Context {run_id} for {equipment_path}")
+                if hasattr(self, "_context_cache") and self._context_cache: self._context_cache.refresh(force=True)
+            except Exception as e: logger.error(f"Failed to dispatch lifecycle event {trigger_type} to backend: {e}")
+        asyncio.create_task(_call_api())
+
+    def _add_to_writer(self, schema_category: str, record: Any):
+        if schema_category == "telemetry": self._db_writer.add_telemetry(record)
+        elif schema_category == "status": self._db_writer.add_status(record)
+        elif schema_category == "alarm": self._db_writer.add_alarm(record)
+        elif schema_category == "event": self._db_writer.add_event(record)
+        elif schema_category == "measurement": self._db_writer.add_measurement(record)
+        elif schema_category == "metrics": self._db_writer.add_metrics(record)
+
+    def _save_schema_suggestion(self, inferred_schema: Dict[str, Any]):
+        if not self._db_pool: return
+        try:
+            with self._db_pool.connection() as conn:
+                cur = conn.cursor()
+                cur.execute("SELECT schema_id FROM uns_payload_schemas WHERE topic_pattern = %s", (inferred_schema["topic_pattern"],))
+                if cur.fetchone(): return
+                cur.execute("INSERT INTO uns_payload_schemas (schema_name, fields, topic_pattern, is_suggested, status) VALUES (%s, %s, %s, %s, %s)", (inferred_schema["name"], json.dumps(inferred_schema["definition"]), inferred_schema["topic_pattern"], True, "suggested"))
+                conn.commit()
+            self._schema_matcher.refresh()
+        except Exception as e: logger.error(f"Failed to save schema suggestion: {e}")
 
     def flush(self):
-        """強制 flush DB writer buffer。"""
-        if self._db_writer:
-            self._db_writer.flush()
+        if self._db_writer: self._db_writer.flush()
+        if self._context_cache: self._context_cache.refresh()
+        if self._master_data_cache: self._master_data_cache.refresh()
 
     def close(self):
-        """Graceful shutdown。"""
-        if self._db_writer:
-            self._db_writer.close()
+        if self._db_writer: self._db_writer.close()
 
     @property
     def stats(self) -> dict:
-        """Pipeline 統計。"""
-        result = {
-            "total_processed": self._total_processed,
-            "total_skipped": self._total_skipped,
-            "total_passthrough": self._total_passthrough,
-            "total_no_schema": self._total_no_schema,
-            "deadband_tracked_tags": self._deadband.state_count,
-        }
-        if self._db_writer:
-            result["db_writer"] = self._db_writer.stats
+        result = {"total_processed": self._total_processed, "total_skipped": self._total_skipped, "total_passthrough": self._total_passthrough, "total_no_schema": self._total_no_schema, "deadband_tracked_tags": self._deadband.state_count}
+        if self._db_writer: result["db_writer"] = self._db_writer.stats
         return result
