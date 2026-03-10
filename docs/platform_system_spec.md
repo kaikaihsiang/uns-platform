@@ -673,6 +673,26 @@ CREATE TABLE ts_measurements (
 - **刪除安全性**：執行節點或 Tag 刪除時，UI 必須提供明確的警示，說明該操作將連帶影響的資源範圍。
 - **查詢路由**：前端 Data Visualization 模組在發起資料請求時，應根據該資料點的 Category 呼叫正確的後端 Endpoint。
 
+### 5.10 Schema 綁定與啟動流程 (Schema Binding & Activation)
+
+為了落實 Schema-Driven 的資料治理，Topic Node 與 Schema Type 的關聯遵循以下流程：
+
+1.  **偵測階段 (Detection)**：
+    - 當 Data Engine 收到未定義的 Topic 時，進入 Auto-detection 模式。
+    - 推斷出的結構存入 `uns_payload_schemas` 並標記為 `is_suggested=true`。
+
+2.  **核准與轉正 (Approval)**：
+    - 管理者在「Schema 建議」介面核准該建議。
+    - 系統將 `is_suggested` 設為 `false`，並將狀態轉為 `confirmed`。
+
+3.  **節點綁定 (Binding)**：
+    - **手動綁定**：管理者在 Namespace 管理頁面選取 Topic Node，透過 API `PUT /api/v1/namespace/nodes/{id}/schema` 指定 `schema_id`。
+    - **UI 整合**：節點編輯器必須提供 Schema 下拉選單，過濾出與該節點語義相符的正式 Schema。
+
+4.  **即時生效 (Activation)**：
+    - 綁定完成後，Data Engine 透過定期刷新（或通知機制）載入新映射。
+    - 下一筆訊息進來時，Data Engine 識別到 `schema_id`，立即啟動欄位提取與資料寫入 `ts_telemetry`。
+
 ---
 
 ## 6. 資料持久化規格

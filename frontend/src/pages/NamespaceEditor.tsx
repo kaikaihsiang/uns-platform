@@ -18,6 +18,7 @@ import {
     Popconfirm,
     Tag,
     Empty,
+    Typography,
 } from 'antd';
 import {
     ApartmentOutlined,
@@ -31,8 +32,11 @@ import {
 import type { TreeProps, TreeDataNode } from 'antd';
 import { useNamespaceStore } from '../store/namespaceStore';
 import { useProductionStore } from '../store/productionStore';
+import { useSchemaStore } from '../store/schemaStore';
 import type { NodeTreeOut } from '../types/namespace';
 import './NamespaceEditor.css';
+
+const { Paragraph } = Typography;
 
 // ── Convert backend tree to AntD TreeDataNode ──
 function toTreeData(nodes: NodeTreeOut[]): TreeDataNode[] {
@@ -76,9 +80,11 @@ export default function NamespaceEditor() {
         renameNode,
         deleteNode,
         updatePersistence,
+        updateNodeSchema,
     } = useNamespaceStore();
 
     const { activeRuns, fetchActiveRuns, isLoading: prodLoading } = useProductionStore();
+    const { schemas, fetchSchemas } = useSchemaStore();
 
     // Modal states
     const [createModalOpen, setCreateModalOpen] = useState(false);
@@ -87,10 +93,11 @@ export default function NamespaceEditor() {
     const [createForm] = Form.useForm();
     const [renameForm] = Form.useForm();
 
-    // Fetch tree on mount
+    // Fetch tree and schemas on mount
     useEffect(() => {
         fetchTree();
-    }, [fetchTree]);
+        fetchSchemas();
+    }, [fetchTree, fetchSchemas]);
 
     const handleDrop: TreeProps['onDrop'] = useCallback(
         async (info: Parameters<NonNullable<TreeProps['onDrop']>>[0]) => {
@@ -388,12 +395,32 @@ export default function NamespaceEditor() {
                                 </div>
                                 {selectedNode.schema_id && (
                                     <div className="detail-field" style={{ marginTop: 12 }}>
-                                        <span className="detail-field-label">Schema Type</span>
+                                        <span className="detail-field-label">目前綁定 ID</span>
                                         <span className="detail-field-value">
-                                            ID: {selectedNode.schema_id}
+                                            {selectedNode.schema_id}
                                         </span>
                                     </div>
                                 )}
+
+                                <div className="detail-field" style={{ marginTop: 16, borderTop: '1px solid var(--border-color)', paddingTop: 16 }}>
+                                    <span className="detail-field-label">資料解析 Schema (Binding)</span>
+                                    <Select
+                                        placeholder="選擇解析 Schema"
+                                        style={{ width: '100%', marginTop: 8 }}
+                                        value={selectedNode.schema_id}
+                                        allowClear
+                                        onChange={(val) => updateNodeSchema(selectedNode.node_id, { schema_id: val })}
+                                        options={(schemas || [])
+                                            .filter(s => !s.is_suggested)
+                                            .map(s => ({
+                                                value: s.schema_id,
+                                                label: `${s.schema_name} (${s.schema_category})`
+                                            }))}
+                                    />
+                                    <Paragraph type="secondary" style={{ fontSize: 12, marginTop: 8 }}>
+                                        綁定核准後的 Schema，Data Engine 才能開始解析並提取資料點。
+                                    </Paragraph>
+                                </div>
                             </div>
                         )}
                         {/* Active Run Card (L3 Production Context) */}

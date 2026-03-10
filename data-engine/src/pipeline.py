@@ -177,7 +177,7 @@ class Pipeline:
         self._bootstrap_until = bootstrap_until
         self._context_cache = ActiveRunCache(db_pool) if db_pool else None
         self._master_data_cache = master_data_cache or MasterDataCache(db_pool)
-        self._auto_detector = AutoDetector(threshold=10)
+        self._auto_detector = AutoDetector(threshold=3)
         self._category_router = CategoryRouter()
 
         self._total_processed = 0
@@ -197,8 +197,12 @@ class Pipeline:
             return
 
         schema = self._schema_matcher.match(topic)
-        if schema is None:
-            self._total_no_schema += 1
+        
+        # Trigger auto-detection if no schema OR if schema exists but has no fields defined
+        if schema is None or not schema.fields:
+            if schema is None:
+                self._total_no_schema += 1
+            
             try:
                 decoder = get_decoder("json")
                 result = decoder.decode(payload_bytes)
@@ -208,7 +212,11 @@ class Pipeline:
                         self._save_schema_suggestion(inferred)
             except Exception as e:
                 logger.debug(f"Auto-detect decoding failed for {topic}: {e}")
-            return
+            
+            # If schema is completely missing, we must return. 
+            # If schema exists but has no fields, we continue to at least store RAW payload if enabled.
+            if schema is None:
+                return
 
         if schema.persist_mode in ("passthrough", "retain"):
             self._total_passthrough += 1
@@ -381,12 +389,29 @@ class Pipeline:
         try:
             with self._db_pool.connection() as conn:
                 cur = conn.cursor()
-                cur.execute("SELECT schema_id FROM uns_payload_schemas WHERE topic_pattern = %s", (inferred_schema["topic_pattern"],))
-                if cur.fetchone(): return
-                cur.execute("INSERT INTO uns_payload_schemas (schema_name, fields, topic_pattern, is_suggested, status) VALUES (%s, %s, %s, %s, %s)", (inferred_schema["name"], json.dumps(inferred_schema["definition"]), inferred_schema["topic_pattern"], True, "suggested"))
+                # Use schema_name and topic_pattern for uniqueness check
+                cur.execute("SELECT schema_id FROM uns_payload_schemas WHERE topic_pattern = %s OR schema_name = %s", (inferred_schema["topic_pattern"], inferred_schema["name"]))
+                if cur.fetchone():
+                    logger.debug(f"Schema suggestion already exists for {inferred_schema['topic_pattern']}")
+                    return
+                
+                # Format fields properly for JSONB
+                fields_json = json.dumps(inferred_schema["definition"])
+                
+                cur.execute(
+                    "INSERT INTO uns_payload_schemas (schema_name, fields, topic_pattern, is_suggested, status) VALUES (%s, %s, %s, %s, %s)",
+                    (inferred_schema["name"], fields_json, inferred_schema["topic_pattern"], True, "suggested")
+                )
                 conn.commit()
-            self._schema_matcher.refresh()
-        except Exception as e: logger.error(f"Failed to save schema suggestion: {e}")
+            
+            logger.info(f"✅ [AutoDetect] Saved new schema suggestion to DB: {inferred_schema['name']}")
+            # Force refresh to make it visible (though it still needs a node mapping to be active)
+            if self._schema_matcher:
+                self._schema_matcher.refresh(force=True)
+                
+        except Exception as e: 
+            logger.error(f"❌ [AutoDetect] Failed to save schema suggestion: {e}")
+            logger.exception(e)
 
     def flush(self):
         if self._db_writer: self._db_writer.flush()

@@ -23,6 +23,10 @@ class NodeRename(BaseModel):
     name: str
 
 
+class NodeSchemaUpdate(BaseModel):
+    schema_id: int | None = None
+
+
 class NodeMove(BaseModel):
     new_parent_id: int | None = None
 

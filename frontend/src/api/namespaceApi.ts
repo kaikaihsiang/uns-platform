@@ -10,6 +10,7 @@ import type {
     NodeMoveRequest,
     NodeRenameRequest,
     NodePersistenceRequest,
+    NodeSchemaUpdateRequest,
 } from '../types/namespace';
 
 /** GET /namespace/tree — 取得完整巢狀樹 */
@@ -48,5 +49,14 @@ export async function updatePersistence(
     body: NodePersistenceRequest
 ): Promise<NodeOut> {
     const { data } = await apiClient.put<NodeOut>(`/namespace/nodes/${nodeId}/persistence`, body);
+    return data;
+}
+
+/** PUT /namespace/nodes/{id}/schema — 綁定 Schema */
+export async function updateNodeSchema(
+    nodeId: number,
+    body: NodeSchemaUpdateRequest
+): Promise<NodeOut> {
+    const { data } = await apiClient.put<NodeOut>(`/namespace/nodes/${nodeId}/schema`, body);
     return data;
 }

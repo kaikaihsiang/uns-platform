@@ -12,6 +12,7 @@ import type {
     NodeCreateRequest,
     NodeRenameRequest,
     NodePersistenceRequest,
+    NodeSchemaUpdateRequest,
 } from '../types/namespace';
 
 interface NamespaceState {
@@ -27,6 +28,7 @@ interface NamespaceState {
     renameNode: (nodeId: number, body: NodeRenameRequest) => Promise<boolean>;
     deleteNode: (nodeId: number) => Promise<boolean>;
     updatePersistence: (nodeId: number, body: NodePersistenceRequest) => Promise<boolean>;
+    updateNodeSchema: (nodeId: number, body: NodeSchemaUpdateRequest) => Promise<boolean>;
 }
 
 export const useNamespaceStore = create<NamespaceState>()((set) => ({
@@ -75,9 +77,15 @@ export const useNamespaceStore = create<NamespaceState>()((set) => ({
 
     renameNode: async (nodeId, body) => {
         try {
-            await api.renameNode(nodeId, body);
+            const updated = await api.renameNode(nodeId, body);
             notification.success({ message: '節點重新命名成功' });
-            await useNamespaceStore.getState().fetchTree();
+            
+            const { selectedNode, fetchTree } = useNamespaceStore.getState();
+            if (selectedNode && selectedNode.node_id === nodeId) {
+                set({ selectedNode: { ...selectedNode, ...updated } });
+            }
+            
+            await fetchTree();
             return true;
         } catch {
             return false;
@@ -98,9 +106,33 @@ export const useNamespaceStore = create<NamespaceState>()((set) => ({
 
     updatePersistence: async (nodeId, body) => {
         try {
-            await api.updatePersistence(nodeId, body);
+            const updated = await api.updatePersistence(nodeId, body);
             notification.success({ message: '持久化設定已更新' });
-            await useNamespaceStore.getState().fetchTree();
+            
+            const { selectedNode, fetchTree } = useNamespaceStore.getState();
+            if (selectedNode && selectedNode.node_id === nodeId) {
+                set({ selectedNode: { ...selectedNode, ...updated } });
+            }
+
+            await fetchTree();
+            return true;
+        } catch {
+            return false;
+        }
+    },
+
+    updateNodeSchema: async (nodeId, body) => {
+        try {
+            const updated = await api.updateNodeSchema(nodeId, body);
+            notification.success({ message: 'Schema 綁定已更新' });
+            
+            const { selectedNode, fetchTree } = useNamespaceStore.getState();
+            if (selectedNode && selectedNode.node_id === nodeId) {
+                // 即時合併最新資料到選取的節點，觸發 UI 重新渲染
+                set({ selectedNode: { ...selectedNode, ...updated } });
+            }
+
+            await fetchTree();
             return true;
         } catch {
             return false;

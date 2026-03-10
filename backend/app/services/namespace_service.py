@@ -277,6 +277,24 @@ async def update_persistence(
     return node
 
 
+async def update_node_schema(
+    db: AsyncSession, node_id: int, schema_id: int | None
+) -> NamespaceNode:
+    """更新節點綁定的 Schema ID。"""
+    node = await db.get(NamespaceNode, node_id)
+    if not node or node.deleted_at:
+        raise ValueError(f"Node {node_id} not found")
+    if node.node_type != "topic" and schema_id is not None:
+        raise ValueError("Only topic nodes can be bound to a schema")
+
+    node.schema_id = schema_id
+    node.updated_at = datetime.now(timezone.utc)
+
+    await db.commit()
+    await db.refresh(node)
+    return node
+
+
 # ─── Internal helpers ─────────────────────────────────────────
 
 

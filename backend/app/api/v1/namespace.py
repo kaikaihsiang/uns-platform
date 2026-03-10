@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.schemas import NodeCreate, NodeRename, NodeMove, NodePersistence, NodeOut
+from app.schemas import NodeCreate, NodeRename, NodeMove, NodePersistence, NodeOut, NodeSchemaUpdate
 from app.services import namespace_service
 
 router = APIRouter(prefix="/namespace", tags=["Namespace"])
@@ -97,8 +97,6 @@ async def delete_node(node_id: int, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail=str(e))
 
 
-
-
 @router.put("/nodes/{node_id}/persistence", response_model=NodeOut)
 async def update_persistence(
     node_id: int, body: NodePersistence, db: AsyncSession = Depends(get_db)
@@ -108,5 +106,16 @@ async def update_persistence(
         return await namespace_service.update_persistence(
             db, node_id, body.persist_mode, body.retention_days
         )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.put("/nodes/{node_id}/schema", response_model=NodeOut)
+async def update_node_schema(
+    node_id: int, body: NodeSchemaUpdate, db: AsyncSession = Depends(get_db)
+):
+    """更新節點綁定的 Schema。"""
+    try:
+        return await namespace_service.update_node_schema(db, node_id, body.schema_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

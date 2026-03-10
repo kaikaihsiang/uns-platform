@@ -33,7 +33,7 @@ const SchemaDetect: React.FC = () => {
 
     const handleConfirmApprove = async () => {
         if (!selectedSuggestion) return;
-        const ok = await approveSuggestion(selectedSuggestion.type_id, selectedCategory);
+        const ok = await approveSuggestion(selectedSuggestion.schema_id, selectedCategory);
         if (ok) {
             message.success('Schema 已核准並轉正');
             setApproveModalOpen(false);
@@ -63,18 +63,20 @@ const SchemaDetect: React.FC = () => {
     const columns = [
         {
             title: '建議名稱',
+            dataIndex: 'schema_name',
+            key: 'schema_name',
             render: (text: string, r: any) => (
                 <Space direction="vertical" size={2}>
                     <Text strong>{text}</Text>
-                    {r.category && (
+                    {r.schema_category && (
                         <Tag color={
-                            r.category === 'telemetry' ? 'blue' :
-                                r.category === 'alarm' ? 'red' :
-                                    r.category === 'status' ? 'green' :
-                                        r.category === 'event' ? 'purple' :
-                                            r.category === 'measurement' ? 'orange' : 'default'
+                            r.schema_category === 'telemetry' ? 'blue' :
+                                r.schema_category === 'alarm' ? 'red' :
+                                    r.schema_category === 'status' ? 'green' :
+                                        r.schema_category === 'event' ? 'purple' :
+                                            r.schema_category === 'measurement' ? 'orange' : 'default'
                         }>
-                            {r.category.toUpperCase()}
+                            {r.schema_category.toUpperCase()}
                         </Tag>
                     )}
                 </Space>
@@ -125,7 +127,7 @@ const SchemaDetect: React.FC = () => {
                     <Button
                         danger
                         icon={<CloseCircleOutlined />}
-                        onClick={() => handleDelete(record.type_id, record.type_name)}
+                        onClick={() => handleDelete(record.schema_id, record.schema_name)}
                     >
                         捨棄
                     </Button>

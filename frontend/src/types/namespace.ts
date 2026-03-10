@@ -8,7 +8,7 @@ export interface NamespaceNode {
     name: string;
     node_type: 'structural' | 'topic';
     full_path: string;
-    schema_id?: number;
+    schema_id?: number | null;
     persist_mode?: string;
     retention_days?: number;
     description?: string;
@@ -103,4 +103,21 @@ export interface SchemaTypeUpdate {
     on_new_field?: string;
     schema_category?: string;
     fields?: SchemaField[];
+}
+
+export interface NodeMoveRequest {
+    new_parent_id: number | null;
+}
+
+export interface NodeRenameRequest {
+    name: string;
+}
+
+export interface NodePersistenceRequest {
+    persist_mode: 'db' | 'retain' | 'passthrough';
+    retention_days: number;
+}
+
+export interface NodeSchemaUpdateRequest {
+    schema_id: number | null;
 }
