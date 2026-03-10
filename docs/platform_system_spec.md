@@ -679,7 +679,7 @@ CREATE TABLE ts_measurements (
 
 1.  **偵測階段 (Detection)**：
     - 當 Data Engine 收到未定義的 Topic 時，進入 Auto-detection 模式。
-    - 推斷出的結構存入 `uns_payload_schemas` 並標記為 `is_suggested=true`。
+    - 推斷出的結構（收集前 3 筆 Payload 樣本）存入 `uns_payload_schemas` 並標記為 `is_suggested=true`。
 
 2.  **核准與轉正 (Approval)**：
     - 管理者在「Schema 建議」介面核准該建議。
