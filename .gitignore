@@ -47,3 +47,5 @@ frontend/build/
 # Docker
 docker-compose.override.yml
 .docker-data/
+
+logs/

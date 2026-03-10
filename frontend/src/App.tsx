@@ -3,15 +3,15 @@
  */
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { ConfigProvider, theme, App as AntApp } from 'antd';
-import AppLayout from './components/AppLayout';
-import NamespaceEditor from './pages/NamespaceEditor';
-import SchemaDetect from './pages/SchemaDetect';
-import SchemaManagement from './pages/SchemaManagement';
-import TagsOverview from './pages/TagsOverview';
-import RecycleBin from './pages/RecycleBin';
-import AiChat from './pages/AiChat';
-import SystemSettings from './pages/SystemSettings';
-import ProductionRunHistory from './pages/ProductionRunHistory';
+import AppLayout from '@/components/AppLayout';
+import NamespaceEditor from '@/pages/NamespaceEditor';
+import SchemaDetect from '@/pages/SchemaDetect';
+import SchemaManagement from '@/pages/SchemaManagement';
+import TagsOverview from '@/pages/TagsOverview';
+import RecycleBin from '@/pages/RecycleBin';
+import AiChat from '@/pages/AiChat';
+import SystemSettings from '@/pages/SystemSettings';
+import ProductionRunHistory from '@/pages/ProductionRunHistory';
 
 import './App.css';
 

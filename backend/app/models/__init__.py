@@ -23,7 +23,7 @@ class Base(DeclarativeBase):
 
 # ─── Production ────────────────────────────────────────────────
 
-from .production import ProductionRun
+from app.models.production import ProductionRun
 
 # ─── Namespace ────────────────────────────────────────────────
 
