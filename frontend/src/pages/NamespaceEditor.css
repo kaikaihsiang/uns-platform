@@ -1,0 +1,242 @@
+/*
+ * NamespaceEditor Page Styles
+ */
+
+.namespace-editor {
+    display: flex;
+    height: 100%;
+    animation: fadeIn var(--transition-base) forwards;
+}
+
+/* ── Left Panel: Tree ── */
+.namespace-tree-panel {
+    width: 420px;
+    min-width: 360px;
+    background: var(--bg-elevated);
+    border-right: 1px solid var(--border-primary);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.namespace-tree-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--space-md);
+    border-bottom: 1px solid var(--border-primary);
+    flex-shrink: 0;
+}
+
+.namespace-tree-header h3 {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+}
+
+.namespace-tree-body {
+    flex: 1;
+    overflow: auto;
+    padding: var(--space-sm);
+}
+
+/* ── AntD Tree Overrides for dark theme ── */
+.namespace-tree-body .ant-tree {
+    background: transparent;
+    color: var(--text-primary);
+}
+
+.namespace-tree-body .ant-tree .ant-tree-treenode {
+    padding: 2px 0;
+    border-radius: var(--radius-sm);
+    transition: background var(--transition-fast);
+}
+
+.namespace-tree-body .ant-tree .ant-tree-treenode:hover {
+    background: var(--bg-surface-hover);
+}
+
+.namespace-tree-body .ant-tree .ant-tree-treenode-selected {
+    background: var(--color-primary-bg) !important;
+}
+
+.namespace-tree-body .ant-tree .ant-tree-node-content-wrapper {
+    color: var(--text-primary);
+    transition: color var(--transition-fast);
+}
+
+.namespace-tree-body .ant-tree .ant-tree-node-content-wrapper:hover {
+    background: transparent;
+}
+
+.namespace-tree-body .ant-tree .ant-tree-node-content-wrapper.ant-tree-node-selected {
+    background: transparent;
+    color: var(--color-primary);
+}
+
+.namespace-tree-body .ant-tree .ant-tree-switcher {
+    color: var(--text-muted);
+}
+
+/* ── Tree Node Custom Rendering ── */
+.tree-node-content {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    padding-right: var(--space-xs);
+}
+
+.tree-node-label {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    flex: 1;
+    min-width: 0;
+}
+
+.tree-node-name {
+    font-size: 13px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.tree-node-type-badge {
+    font-size: 10px;
+    padding: 0 5px;
+    border-radius: var(--radius-sm);
+    line-height: 18px;
+    flex-shrink: 0;
+}
+
+.tree-node-type-badge.structural {
+    color: var(--color-info);
+    background: rgba(116, 185, 255, 0.1);
+    border: 1px solid rgba(116, 185, 255, 0.2);
+}
+
+.tree-node-type-badge.topic {
+    color: var(--color-primary);
+    background: var(--color-primary-bg);
+    border: 1px solid var(--color-primary-border);
+}
+
+.tree-node-actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    opacity: 0;
+    transition: opacity var(--transition-fast);
+}
+
+.tree-node-content:hover .tree-node-actions {
+    opacity: 1;
+}
+
+.tree-node-actions .ant-btn {
+    color: var(--text-muted);
+}
+
+.tree-node-actions .ant-btn:hover {
+    color: var(--color-primary);
+    background: var(--color-primary-bg);
+}
+
+/* ── Right Panel: Detail ── */
+.namespace-detail-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: auto;
+    animation: slideInRight var(--transition-base) forwards;
+}
+
+.namespace-detail-empty {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+    gap: var(--space-md);
+}
+
+.namespace-detail-empty .anticon {
+    font-size: 48px;
+    opacity: 0.3;
+}
+
+.namespace-detail-content {
+    padding: var(--space-lg);
+}
+
+.detail-section {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-primary);
+    border-radius: var(--radius-md);
+    padding: var(--space-lg);
+    margin-bottom: var(--space-md);
+}
+
+.detail-section-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: var(--space-md);
+    padding-bottom: var(--space-sm);
+    border-bottom: 1px solid var(--border-primary);
+}
+
+.detail-field {
+    display: flex;
+    align-items: flex-start;
+    margin-bottom: var(--space-sm);
+}
+
+.detail-field-label {
+    width: 120px;
+    flex-shrink: 0;
+    font-size: 12px;
+    color: var(--text-muted);
+    padding-top: 2px;
+}
+
+.detail-field-value {
+    font-size: 13px;
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    word-break: break-all;
+}
+
+
+/* ── Persistence Badges ── */
+.tree-node-persist-badge {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-left: 8px;
+    flex-shrink: 0;
+    vertical-align: middle;
+}
+
+.tree-node-persist-badge.db {
+    background-color: var(--color-success);
+    box-shadow: 0 0 4px var(--color-success);
+}
+
+.tree-node-persist-badge.retain {
+    background-color: var(--color-warning);
+}
+
+.tree-node-persist-badge.passthrough {
+    background-color: transparent;
+    border: 1px dashed var(--border-primary);
+}

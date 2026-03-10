@@ -1,0 +1,75 @@
+.schema-detect-page {
+    padding: 24px;
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+.page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 32px;
+}
+
+.suggestion-card {
+    background: var(--color-bg-container);
+    border: 1px solid var(--color-border);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+    border-radius: 12px;
+}
+
+.field-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    max-width: 400px;
+}
+
+.field-tag {
+    background: rgba(255, 255, 255, 0.05) !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    color: var(--text-secondary) !important;
+    margin: 0 !important;
+}
+
+.field-type {
+    font-size: 11px;
+    opacity: 0.6;
+}
+
+.info-section {
+    margin-top: 32px;
+    opacity: 0.8;
+}
+
+.mechanism-list {
+    padding-left: 20px;
+    margin: 0;
+}
+
+.mechanism-list li {
+    margin-bottom: 8px;
+    color: var(--text-secondary);
+}
+
+.mechanism-list strong {
+    color: var(--text-primary);
+}
+
+/* AntD Table Customization */
+.ant-table {
+    background: transparent !important;
+}
+
+.ant-table-thead>tr>th {
+    background: rgba(255, 255, 255, 0.02) !important;
+    border-bottom: 1px solid var(--color-border) !important;
+}
+
+.ant-table-tbody>tr>td {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
+}
+
+.ant-table-tbody>tr:hover>td {
+    background: rgba(0, 210, 211, 0.03) !important;
+}
