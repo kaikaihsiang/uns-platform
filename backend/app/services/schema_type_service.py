@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import UnsPayloadSchema
 
 
-async def list_schema_types(db: AsyncSession) -> list[UnsPayloadSchema]:
+async def list_payload_schema(db: AsyncSession) -> list[UnsPayloadSchema]:
     """列出所有 Schema Types（過濾掉已刪除的）。"""
     result = await db.execute(
         select(UnsPayloadSchema)
@@ -19,12 +19,12 @@ async def list_schema_types(db: AsyncSession) -> list[UnsPayloadSchema]:
     return list(result.scalars().all())
 
 
-async def get_schema_type(db: AsyncSession, type_id: int) -> UnsPayloadSchema | None:
+async def get_payload_schema(db: AsyncSession, type_id: int) -> UnsPayloadSchema | None:
     """取得單一 Schema Type。"""
     return await db.get(UnsPayloadSchema, type_id)
 
 
-async def create_schema_type(db: AsyncSession, **kwargs) -> UnsPayloadSchema:
+async def create_payload_schema(db: AsyncSession, **kwargs) -> UnsPayloadSchema:
     """建立 Schema Type。"""
     schema_type = UnsPayloadSchema(**kwargs)
     db.add(schema_type)
@@ -68,7 +68,7 @@ async def delete_schema_type(db: AsyncSession, type_id: int) -> UnsPayloadSchema
 # ─── Recycle Bin ──────────────────────────────────────────────
 
 
-async def get_deleted_schema_types(db: AsyncSession) -> list[UnsPayloadSchema]:
+async def get_deleted_payload_schema(db: AsyncSession) -> list[UnsPayloadSchema]:
     """取得所有 Soft-deleted 的 Schema Types。"""
     result = await db.execute(
         select(UnsPayloadSchema)
@@ -78,7 +78,7 @@ async def get_deleted_schema_types(db: AsyncSession) -> list[UnsPayloadSchema]:
     return list(result.scalars().all())
 
 
-async def restore_schema_type(db: AsyncSession, type_id: int) -> UnsPayloadSchema:
+async def restore_payload_schema(db: AsyncSession, type_id: int) -> UnsPayloadSchema:
     """從資源回收桶還原 Schema Type。"""
     schema_type = await db.get(UnsPayloadSchema, type_id)
     if not schema_type or schema_type.deleted_at is None:
@@ -91,7 +91,7 @@ async def restore_schema_type(db: AsyncSession, type_id: int) -> UnsPayloadSchem
     return schema_type
 
 
-async def hard_delete_schema_type(db: AsyncSession, type_id: int) -> None:
+async def hard_delete_payload_schema(db: AsyncSession, type_id: int) -> None:
     """徹底刪除 Schema Type，從資料庫中抹除。"""
     schema_type = await db.get(UnsPayloadSchema, type_id)
     if not schema_type or schema_type.deleted_at is None:

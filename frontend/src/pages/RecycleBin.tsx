@@ -162,14 +162,14 @@ export default function RecycleBin() {
     const schemaColumns = [
         {
             title: 'ID',
-            dataIndex: 'type_id',
-            key: 'type_id',
+            dataIndex: 'schema_id',
+            key: 'schema_id',
             width: 60,
         },
         {
             title: 'Schema 名稱',
-            dataIndex: 'type_name',
-            key: 'type_name',
+            dataIndex: 'schema_name',
+            key: 'schema_name',
             render: (name: string) => <strong>{name}</strong>,
         },
         {
@@ -196,7 +196,7 @@ export default function RecycleBin() {
             title: '操作',
             key: 'actions',
             width: 220,
-            render: (_: any, record: any) => renderActions('schema', record.type_id, record.type_name),
+            render: (_: any, record: any) => renderActions('schema', record.schema_id, record.schema_name),
         },
     ];
 
