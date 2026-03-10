@@ -43,6 +43,7 @@ class TagLookup:
 
     def __init__(self, db_pool: Optional[DBPool] = None):
         self._db_pool = db_pool
+        # Mapping: "topic::field_name" -> (tag_id, asset_path)
         self._cache: dict[str, tuple[int, str]] = {}
         if db_pool:
             self._load_from_db()
@@ -246,7 +247,19 @@ class Pipeline:
                     self._db_writer.add_telemetry(TelemetryRecord(time=ev.timestamp, tag_id=tag_id, value=ev.value, value_text=ev.value_text, value_json=ev.value_json, quality='good', run_id=run_id, lot_id=lot_id))
             self.flush()
         else:
-            tag_id, asset_path = self._tag_lookup.get_tag_id(topic=topic, field_name="", schema_category=schema_category)
+            # Determine appropriate data type for the category tag
+            category_dtype = "string"
+            if schema_category == "metrics":
+                category_dtype = "json"
+            elif schema_category == "measurement":
+                category_dtype = "float"
+
+            tag_id, asset_path = self._tag_lookup.get_tag_id(
+                topic=topic, 
+                field_name="", 
+                schema_category=schema_category,
+                data_type=category_dtype
+            )
             if tag_id is None:
                 self._total_skipped += 1
                 return
@@ -276,6 +289,7 @@ class Pipeline:
                 else:
                     record = self._build_non_telemetry_record(schema_category, receive_time, tag_id, target_kwargs, details, run_id, lot_id, schema, asset_path)
                 if record:
+                    logger.info("DEBUG: Adding to writer: %s, record=%s", schema_category, record)
                     self._add_to_writer(schema_category, record)
 
     def _build_non_telemetry_record(self, schema_category: str, receive_time: datetime, tag_id: int, target_kwargs: dict, details: dict, run_id: Optional[int] = None, lot_id: Optional[str] = None, schema: Any = None, asset_path: str = "", metrics_values: Optional[dict] = None):
@@ -301,85 +315,23 @@ class Pipeline:
         metadata = discovered.get("metadata", {}) if discovered else {}
 
         if schema_category == "status":
-            return StatusRecord(
-                time=receive_time, 
-                tag_id=tag_id, 
-                state_code=main_code or "STATE-CODE-UNKNOWN", 
-                sub_state_code=final_sub, 
-                code_category=final_cat or "STATE-CATEGORY-UNKNOWN", 
-                mode=target_kwargs.get("mode"), 
-                run_id=run_id, 
-                lot_id=lot_id, 
-                details=details if details else None
-                )
+            return StatusRecord(time=receive_time, tag_id=tag_id, state_code=main_code or "STATE-CODE-UNKNOWN", sub_state_code=final_sub, code_category=final_cat or "equipment_state", mode=target_kwargs.get("mode"), run_id=run_id, lot_id=lot_id, details=details if details else None)
         elif schema_category == "alarm":
             alarm_id = target_kwargs.get("alarm_id") or details.get("alarm_id")
             if not alarm_id:
                 alarm_id = _generate_synthetic_id("ALM", f"{tag_id}-{main_code}-{receive_time.isoformat()}")
-            return AlarmRecord(
-                time=receive_time, 
-                tag_id=tag_id, 
-                alarm_id=alarm_id, 
-                alarm_code=main_code or "ALM-CODE-UNKNOWN", 
-                sub_alarm_code=final_sub, 
-                code_category=final_cat or "ALARM-CATEGORY-UNKNOWN", 
-                severity=_safe_str(target_kwargs.get("severity"), metadata.get("severity", "warning")), 
-                message=_safe_str(target_kwargs.get("message")), 
-                alarm_status=_safe_str(target_kwargs.get("alarm_status")),
-                value=_safe_float(target_kwargs.get("value")), 
-                threshold=_safe_float(target_kwargs.get("threshold")), 
-                run_id=run_id, 
-                lot_id=lot_id, 
-                details=details if details else None
-                )
+            return AlarmRecord(time=receive_time, tag_id=tag_id, alarm_id=alarm_id, alarm_code=main_code or "ALM-CODE-UNKNOWN", sub_alarm_code=final_sub, code_category=final_cat or "alarm_code", severity=_safe_str(target_kwargs.get("severity"), metadata.get("severity", "warning")), message=_safe_str(target_kwargs.get("message")), alarm_status=_safe_str(target_kwargs.get("alarm_status")), value=_safe_float(target_kwargs.get("value")), threshold=_safe_float(target_kwargs.get("threshold")), run_id=run_id, lot_id=lot_id, details=details if details else None)
         elif schema_category == "event":
             trigger = metadata.get("lifecycle_trigger")
             if trigger: self._dispatch_mes_event(trigger, target_kwargs, details, asset_path)
             event_id = target_kwargs.get("event_id") or details.get("event_id")
             if not event_id:
                 event_id = _generate_synthetic_id("EVT", f"{tag_id}-{main_code}-{receive_time.isoformat()}")
-            return EventRecord(
-                time=receive_time, 
-                tag_id=tag_id, 
-                event_id=event_id, 
-                event_code=main_code or "EVENT-CODE-UNKNOWN", 
-                sub_event_code=final_sub, 
-                code_category=final_cat or "EVENT-CATEGORY-UNKNOWN", 
-                result=_safe_str(target_kwargs.get("result")), 
-                run_id=run_id, 
-                lot_id=_safe_str(target_kwargs.get("lot_id")) if "lot_id" in target_kwargs else lot_id, 
-                details=details if details else None
-                )
+            return EventRecord(time=receive_time, tag_id=tag_id, event_id=event_id, event_code=main_code or "EVENT-CODE-UNKNOWN", sub_event_code=final_sub, code_category=final_cat or "equipment_state", result=_safe_str(target_kwargs.get("result")), run_id=run_id, lot_id=_safe_str(target_kwargs.get("lot_id")) if "lot_id" in target_kwargs else lot_id, details=details if details else None)
         elif schema_category == "measurement":
-            return MeasurementRecord(
-                time=receive_time, 
-                tag_id=tag_id, 
-                value=_safe_float(target_kwargs.get("value"), 0.0), 
-                spec_upper=_safe_float(target_kwargs.get("spec_upper")), 
-                spec_lower=_safe_float(target_kwargs.get("spec_lower")), 
-                target_value=_safe_float(target_kwargs.get("target_value")), 
-                result=_safe_str(target_kwargs.get("result")), 
-                run_id=run_id, 
-                lot_id=_safe_str(target_kwargs.get("lot_id")) if "lot_id" in target_kwargs else lot_id, 
-                step_id=_safe_str(target_kwargs.get("step_id")), 
-                sample_id=_safe_str(target_kwargs.get("sample_id") or target_kwargs.get("panel_id")), 
-                sample_position=_safe_str(target_kwargs.get("sample_position")), 
-                inspector=_safe_str(target_kwargs.get("inspector")), 
-                context=target_kwargs.get("context"), 
-                details=details if details else None
-                )
+            return MeasurementRecord(time=receive_time, tag_id=tag_id, value=_safe_float(target_kwargs.get("value"), 0.0), spec_upper=_safe_float(target_kwargs.get("spec_upper")), spec_lower=_safe_float(target_kwargs.get("spec_lower")), target_value=_safe_float(target_kwargs.get("target_value")), result=_safe_str(target_kwargs.get("result")), run_id=run_id, lot_id=_safe_str(target_kwargs.get("lot_id")) if "lot_id" in target_kwargs else lot_id, step_id=_safe_str(target_kwargs.get("step_id")), sample_id=_safe_str(target_kwargs.get("sample_id") or target_kwargs.get("panel_id")), sample_position=_safe_str(target_kwargs.get("sample_position")), inspector=_safe_str(target_kwargs.get("inspector")), context=target_kwargs.get("context"), details=details if details else None)
         elif schema_category == "metrics":
-            return MetricsRecord(
-                time=receive_time, 
-                tag_id=tag_id, 
-                metric_category=final_cat or "METRIC-CATEGORY-UNKNOWN", 
-                metric_code=main_code or "METRIC-CODE-UNKNOWN", 
-                sub_metric_code=final_sub, 
-                period=_safe_str(target_kwargs.get("period")), 
-                values=target_kwargs.get("values") or metrics_values or {}, 
-                context=target_kwargs.get("context"), 
-                details=details if details else None
-                )
+            return MetricsRecord(time=receive_time, tag_id=tag_id, metric_category=final_cat or "metric_definition", metric_code=main_code or "METRIC-CODE-UNKNOWN", sub_metric_code=final_sub, period=_safe_str(target_kwargs.get("period")), values=target_kwargs.get("values") or metrics_values or {}, context=target_kwargs.get("context"), details=details if details else None)
 
     def _dispatch_mes_event(self, trigger_type: str, target_kwargs: dict, details: dict, asset_path: str):
         logger.info(f"Dispatching Production Lifecycle Trigger: {trigger_type} for path {asset_path}")
@@ -390,17 +342,14 @@ class Pipeline:
             equipment_path = "/".join(temp_path.split("/")[:-1])
         else:
             equipment_path = temp_path
+        
+        # Up-level to line level for context
+        equipment_path = "/".join(equipment_path.split("/")[:-1])
+
         async def _call_api():
             try:
                 if trigger_type == "start":
-                    payload = {
-                        "equipment_path": equipment_path, 
-                        "lot_id": target_kwargs.get("lot_id") or details.get("lot_id", "UNKNOWN_LOT"), 
-                        "step_id": target_kwargs.get("step_id") or details.get("step_id", "UNKNOWN_STEP"), 
-                        "recipe_id": target_kwargs.get("recipe_id") or details.get("recipe_id"), 
-                        "product_id": target_kwargs.get("product_id") or details.get("product_id"), 
-                        "context": details if details else {}
-                        }
+                    payload = {"equipment_path": equipment_path, "lot_id": target_kwargs.get("lot_id") or details.get("lot_id", "UNKNOWN_LOT"), "step_id": target_kwargs.get("step_id") or details.get("step_id", "UNKNOWN_STEP"), "recipe_id": target_kwargs.get("recipe_id") or details.get("recipe_id"), "product_id": target_kwargs.get("product_id") or details.get("product_id"), "context": details if details else {}}
                     async with httpx.AsyncClient() as client:
                         resp = await client.post(api_url + "/", json=payload, timeout=5.0)
                         resp.raise_for_status()
@@ -443,6 +392,7 @@ class Pipeline:
         if self._db_writer: self._db_writer.flush()
         if self._context_cache: self._context_cache.refresh()
         if self._master_data_cache: self._master_data_cache.refresh()
+        if self._schema_matcher: self._schema_matcher.refresh()
 
     def close(self):
         if self._db_writer: self._db_writer.close()

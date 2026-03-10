@@ -172,7 +172,8 @@ def main():
             time.sleep(args.interval)
             publish_scenario_event(client, "LOT_START", lot_id)
             publish_scenario_status(client, "PRD", "RUN")
-            
+            time.sleep(args.interval)
+
             for b in range(1, 4):
                 unit_id = f"PCB-{lot_id}-{b:03d}"
                 publish_scenario_event(client, "UNIT_IN", lot_id, unit_id)
@@ -181,9 +182,13 @@ def main():
                 publish_scenario_event(client, "UNIT_OUT", lot_id, unit_id)
                 publish_scenario_measurement(client)
                 time.sleep(args.interval/2)
+                publish_scenario_alarm(client)
+                time.sleep(args.interval/2)
             
             publish_scenario_metrics(client)
+            time.sleep(args.interval)
             publish_scenario_event(client, "LOT_END", lot_id)
+            time.sleep(args.interval)
             publish_scenario_status(client, "SBY", "IDL")
             print("--- Lifecycle Completed ---")
 

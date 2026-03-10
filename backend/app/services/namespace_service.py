@@ -323,9 +323,9 @@ async def _live_migrate_tags(
             .values(active=False)
         )
 
-        # 計算新 MQTT topic（asset_path + category）
-        old_topic_base = f"{tag.asset_path}/{tag.category}"
-        new_topic_base = f"{new_asset_path}/{tag.category}"
+        # 計算新 MQTT topic（asset_path + tag.display_name)
+        old_topic_base = f"{tag.asset_path}/{tag.display_name}"
+        new_topic_base = f"{new_asset_path}/{tag.display_name}"
         if tag.data_point:
             old_topic = f"{old_topic_base}/{tag.data_point}"
             new_topic = f"{new_topic_base}/{tag.data_point}"

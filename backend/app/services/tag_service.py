@@ -71,25 +71,34 @@ async def create_tag(
 
 async def update_tag(db: AsyncSession, tag_id: int, **kwargs) -> Tag:
     """
-    更新 Tag 並同步更新 MQTT topic (如果 category 或 data_point 改變)。
+    更新 Tag 並詳細記錄變更內容。
     """
     tag = await db.get(Tag, tag_id)
     if not tag or tag.deleted_at is not None:
         raise ValueError(f"Tag {tag_id} not found")
 
-    old_category = tag.category
-    old_data_point = tag.data_point
+    changes = []
+    for key, new_value in kwargs.items():
+        # 僅處理 Tag 模型中存在的屬性
+        if not hasattr(tag, key):
+            continue
+            
+        old_value = getattr(tag, key)
+        
+        # 僅在數值真正發生變動時記錄 (排除 None 且值相同的更新)
+        if new_value is not None and new_value != old_value:
+            changes.append(f"{key}: {old_value} -> {new_value}")
+            setattr(tag, key, new_value)
 
-    # Update Tag fields
-    for key, value in kwargs.items():
-        if value is not None:
-            setattr(tag, key, value)
+    # 如果沒有任何欄位變動，直接回傳
+    if not changes:
+        return tag
 
-    # Audit log for tag update
+    # Audit log: 記錄詳細的變更內容
     log = TagChangeLog(
         tag_id=tag_id,
         change_type="update",
-        reason=f"Fields updated: {', '.join(kwargs.keys())}",
+        reason=f"變更明細: {'; '.join(changes)}",
         changed_by="api",
     )
     db.add(log)

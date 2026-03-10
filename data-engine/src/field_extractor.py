@@ -132,6 +132,14 @@ def _coerce_value(raw_value, field_type: str) -> tuple:
             return (None, str(raw_value), None)
 
 
+def _detect_type(val) -> str:
+    """從原始值推斷資料型別。"""
+    if isinstance(val, bool): return "boolean"
+    if isinstance(val, (int, float)): return "float"
+    if isinstance(val, (dict, list)): return "json"
+    return "string"
+
+
 class FieldExtractor:
     def extract(
         self,
@@ -174,15 +182,19 @@ class FieldExtractor:
         if isinstance(data_block, dict):
             for key, val in data_block.items():
                 if key not in processed_top_keys:
+                    dtype = _detect_type(val)
+                    val_f, val_t, val_j = _coerce_value(val, dtype)
                     results.append(ExtractedValue(
                         field_name=key,
                         tag_suffix=key,
-                        value_json=val,
-                        field_type="json",
+                        value=val_f,
+                        value_text=val_t,
+                        value_json=val_j,
+                        field_type=dtype,
                         timestamp=timestamp,
                         persist=True,
                         target_column=None,
-                        is_schema_defined=False # 標記為非 Schema 定義
+                        is_schema_defined=False
                     ))
 
         return results

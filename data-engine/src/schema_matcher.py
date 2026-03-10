@@ -152,9 +152,14 @@ class SchemaMatcher:
 
         return None
 
-    def refresh(self):
-        """重新載入 DB 快取。"""
-        if self._db_pool:
-            self._load_from_db()
-        else:
-            logger.warning("No DB pool, cannot refresh schema cache")
+    def refresh(self, force: bool = False):
+        """重新載入 DB 快取，具備節流機制防止過度查詢。"""
+        if not self._db_pool:
+            return
+
+        import time
+        now = time.monotonic()
+        if not force and (now - self._last_refresh < 5.0):
+            return
+
+        self._load_from_db()
