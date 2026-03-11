@@ -3,7 +3,6 @@ from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
 import pytest
-from src.db_pool import DBPool
 
 # --- Mock DB Infrastructure (for unit tests) ---
 
@@ -47,6 +46,7 @@ def test_db_config():
 def real_db_pool(test_db_config):
     """Provides a real DBPool pointing to uns_test, with automatic cleanup."""
     import os
+
     from src.config import Config
     from src.db_pool import DBPool
     
