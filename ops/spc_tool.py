@@ -282,7 +282,7 @@ def cmd_correlation(conn, args):
         mean_x = sum(process_vals) / n
         mean_y = sum(quality_vals) / n
 
-        cov = sum((x - mean_x) * (y - mean_y) for x, y in zip(process_vals, quality_vals)) / n
+        cov = sum((x - mean_x) * (y - mean_y) for x, y in zip(process_vals, quality_vals, strict=False)) / n
         std_x = math.sqrt(sum((x - mean_x) ** 2 for x in process_vals) / n)
         std_y = math.sqrt(sum((y - mean_y) ** 2 for y in quality_vals) / n)
 

@@ -95,7 +95,7 @@ class MasterDataCache:
 
         # 3. 嘗試單一子代碼匹配
         if sub_code:
-            for (cat, val), info in self._cache.items():
+            for (cat, _val), info in self._cache.items():
                 if info.get("sub_code") == sub_code:
                     return {"code_category": cat, **info}
 

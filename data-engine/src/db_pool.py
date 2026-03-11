@@ -87,7 +87,7 @@ class DBPool:
             if conn:
                 # 發生其他例外時，rollback 並放回池中
                 try: conn.rollback()
-                except: pass
+                except Exception: pass
             raise
         finally:
             if conn:

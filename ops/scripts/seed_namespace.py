@@ -53,8 +53,10 @@ def get_schema_id_by_name(name):
                 return s['schema_id']
     return None
 
-def create_schema(name, category, decoder="json", timestamp_field=None, store_raw=True, fields=[]):
+def create_schema(name, category, decoder="json", timestamp_field=None, store_raw=True, fields=None):
     """建立 Schema，如果已存在則返回現有 ID。"""
+    if fields is None:
+        fields = []
     existing_id = get_schema_id_by_name(name)
     if existing_id:
         print(f"ℹ Schema '{name}' already exists (ID: {existing_id}).")

@@ -117,7 +117,7 @@ class TagLookup:
                     try:
                         cur_upd.execute("UPDATE tags SET last_data_at = NOW() WHERE tag_id = %s", (tag_id,))
                         conn.commit()
-                    except: conn.rollback()
+                    except Exception: conn.rollback()
                     finally: cur_upd.close()
 
                     self._cache[key] = (tag_id, asset_path)
@@ -316,7 +316,7 @@ class Pipeline:
         def _safe_float(val, default=None):
             if val is None: return default
             try: return float(val)
-            except: return default
+            except Exception: return default
         def _safe_str(val, default=""):
             if val is None: return default
             return str(val)

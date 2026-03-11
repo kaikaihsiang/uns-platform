@@ -29,13 +29,13 @@ async def db_session(test_engine):
         # Clear all tables using the function provided by db-schema-engineer
         await conn.execute(text("SELECT truncate_all_tables_test();"))
     
-    SessionLocal = async_sessionmaker(
+    session_local = async_sessionmaker(
         test_engine,
         class_=AsyncSession,
         expire_on_commit=False,
     )
     
-    async with SessionLocal() as session:
+    async with session_local() as session:
         await seed_test_data(session)
         yield session
 

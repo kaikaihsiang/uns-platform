@@ -494,26 +494,3 @@ class DBWriter:
         logger.info("DBWriter closing, flushing remaining buffer...")
         self.flush()
         logger.info("DBWriter stats: %s", self.stats)
-
-
-    @property
-    def stats(self) -> dict:
-        """回傳寫入統計。"""
-        with self._lock:
-            return {
-                "telemetry_written": self._total_telemetry_written,
-                "raw_written": self._total_raw_written,
-                "errors": self._total_errors,
-                "telemetry_buffer": len(self._telemetry_buffer),
-                "status_buffer": len(self._status_buffer),
-                "alarm_buffer": len(self._alarm_buffer),
-                "event_buffer": len(self._event_buffer),
-                "meas_buffer": len(self._meas_buffer),
-                "raw_buffer": len(self._raw_buffer),
-            }
-
-    def close(self):
-        """Graceful shutdown：flush 剩餘 buffer。"""
-        logger.info("DBWriter closing, flushing remaining buffer...")
-        self.flush()
-        logger.info("DBWriter stats: %s", self.stats)

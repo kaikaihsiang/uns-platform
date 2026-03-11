@@ -1,4 +1,3 @@
-
 import sys
 import os
 from datetime import datetime, timezone
@@ -58,7 +57,7 @@ payload = {
 }
 payload_bytes = bytes(__import__('json').dumps(payload), 'utf-8')
 
-print(f"--- 執行驗證場景 ---")
+print("--- 執行驗證場景 ---")
 print(f"Topic: {topic}")
 print(f"Payload: {payload}")
 
@@ -68,9 +67,8 @@ pipeline.process(topic, payload_bytes)
 # 4. 檢查結果
 if writer.records:
     record = writer.records[0]
-    print(f"
---- 驗證結果 ---")
-    print(f"Category: Event")
+    print("\n--- 驗證結果 ---")
+    print("Category: Event")
     print(f"Event Code (實體欄位): {record.event_code}")
     print(f"Details (溢位袋內容): {record.details}")
     
@@ -82,10 +80,9 @@ if writer.records:
     assert record.details["target_temp"] == 250
     assert "step_time" in record.details, "FAILED: 自動捕捉的溢位欄位遺失"
     
-    print(f"
-✅ [SUCCESS] 單一溢位出口機制驗證通過！")
-    print(f" - 手動映射 (recipe_id) 成功進入 details")
-    print(f" - 自動捕捉 (target_temp, step_time) 成功進入 details")
-    print(f" - 實體欄位 (event_code) 保持獨立")
+    print("\n✅ [SUCCESS] 單一溢位出口機制驗證通過！")
+    print(" - 手動映射 (recipe_id) 成功進入 details")
+    print(" - 自動捕捉 (target_temp, step_time) 成功進入 details")
+    print(" - 實體欄位 (event_code) 保持獨立")
 else:
-    print(f"❌ [FAILED] 未產生任何 Record")
+    print("❌ [FAILED] 未產生任何 Record")

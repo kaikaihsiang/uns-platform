@@ -114,7 +114,7 @@ async def get_tag(db: AsyncSession, tag_id: int) -> Tag | None:
 
 async def list_tags_by_path(db: AsyncSession, node_path: str, recursive: bool = False) -> list[Tag]:
     """取得某 asset_path 底下的所有 Tag。"""
-    stmt = select(Tag).where(Tag.deleted_at == None)
+    stmt = select(Tag).where(Tag.deleted_at.is_(None))
     
     if recursive:
         stmt = stmt.where(Tag.asset_path.like(f"{node_path}%"))
@@ -251,7 +251,7 @@ async def get_deleted_tags(db: AsyncSession) -> list[Tag]:
     """取得所有 Soft-deleted 的 Tags。"""
     result = await db.execute(
         select(Tag)
-        .where(Tag.deleted_at != None)
+        .where(Tag.deleted_at.is_not(None))
         .order_by(desc(Tag.deleted_at))
     )
     return list(result.scalars().all())
