@@ -1,0 +1,86 @@
+name: UNS Platform CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install Ruff
+        run: pip install ruff
+      - name: Run Ruff
+        run: ruff check .
+
+  backend-tests:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: timescale/timescaledb:latest-pg16
+        env:
+          POSTGRES_DB: uns_test
+          POSTGRES_USER: uns_admin
+          POSTGRES_PASSWORD: uns_dev_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install dependencies
+        run: |
+          pip install fastapi uvicorn sqlalchemy asyncpg psycopg2-binary pydantic-settings httpx pytest pytest-asyncio pytest-env greenlet
+      - name: Run tests
+        env:
+          DATABASE_URL: postgresql+asyncpg://uns_admin:uns_dev_password@localhost:5432/uns_test
+          PYTHONPATH: ${{ github.workspace }}/backend
+        run: |
+          pytest backend/tests
+
+  data-engine-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install dependencies
+        run: |
+          pip install pytest pytest-asyncio jsonpath-ng psycopg2-binary httpx
+      - name: Run tests
+        run: |
+          pytest data-engine/tests
+
+  frontend-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-python@v5 # Actually uses Node in standard setup, but here we just need npm
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Run tests
+        working-directory: frontend
+        run: npm run test
