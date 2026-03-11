@@ -46,10 +46,12 @@ def test_db_config():
 @pytest.fixture
 def real_db_pool(test_db_config):
     """Provides a real DBPool pointing to uns_test, with automatic cleanup."""
-    # Override Config for the duration of this fixture if needed, 
-    # but here we just pass dsn to the pool init if possible or use env.
-    
     import os
+    from src.config import Config
+    from src.db_pool import DBPool
+    
+    # 關鍵修正：在初始化 DBPool 前強行覆蓋類別屬性
+    Config.DB_NAME = "uns_test"
     os.environ["DB_NAME"] = "uns_test"
     
     pool = DBPool()

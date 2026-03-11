@@ -110,6 +110,7 @@ jobs:
       - name: Run tests
         env:
           PYTHONPATH: ${{ github.workspace }}/data-engine
+          DB_NAME: uns_test
         run: |
           pytest data-engine/tests
 

@@ -48,7 +48,7 @@
 | F2 (Phase 2): Timeseries ORM | ✅ DONE | backend-engineer | 2026-03-06 | 補齊所有 `ts_*` 表 Model，確保與 ADR-003 分流架構 100% 對齊 |
 | F3 (Phase 2): Frontend Phase 3 | ✅ DONE | frontend-agent | 2026-03-06 | Active Lot 看板 + Target Column Mapping UI + Run History (API 404/500 已修復) |
 | F4 (Phase 2): Ops Scripts | ✅ DONE | backend-engineer | 2026-03-06 | 實作一鍵啟動 (`start_all.sh`) 與一鍵關閉 (`stop_all.sh`) 提升維運體驗 |
-| F4 (Phase 3): DevOps | 🔨 IN PROGRESS | gemini-cli | 2026-03-11 | 基礎設施與 14+ 測試案例已驗證通過 (本地)，CI Workflow 已建立但待遠端觸發驗證 |
+| F4 (Phase 3): DevOps | ✅ DONE | gemini-cli | 2026-03-11 | 基礎設施與 14+ 測試案例已通過 GitHub CI 驗證 (Backend/Data-Engine/Frontend) |
 | F5 (Phase 2): Data Engine Test Arsenal | ✅ DONE | data-engine-engineer | 2026-03-06 | 實作 `reset_db.sh`、`seed_namespace.sh` (TaiwanPrecision) 與智慧工廠模擬器 (`start_sim.sh`) |
 
 ## 🔴 Blockers / Decisions Needed
