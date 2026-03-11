@@ -10,7 +10,6 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Integer,
-    String,
     Text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -23,7 +22,7 @@ class Base(DeclarativeBase):
 
 # ─── Production ────────────────────────────────────────────────
 
-from app.models.production import ProductionRun
+from app.models.production import ProductionRun as ProductionRun
 
 # ─── Namespace ────────────────────────────────────────────────
 

@@ -12,7 +12,7 @@ from app.models import NamespaceNode, Tag, TagChangeLog, TagSourceMapping
 async def get_all_nodes(db: AsyncSession):
     """取得所有 Nodes 的平坦列表（不分層級）。"""
     result = await db.execute(
-        select(NamespaceNode).where(NamespaceNode.deleted_at == None)
+        select(NamespaceNode).where(NamespaceNode.deleted_at.is_(None))
     )
     return result.scalars().all()
 

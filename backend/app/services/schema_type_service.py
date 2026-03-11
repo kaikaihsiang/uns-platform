@@ -13,7 +13,7 @@ async def list_payload_schema(db: AsyncSession) -> list[UnsPayloadSchema]:
     """列出所有 Schema Types（過濾掉已刪除的）。"""
     result = await db.execute(
         select(UnsPayloadSchema)
-        .where(UnsPayloadSchema.deleted_at == None)
+        .where(UnsPayloadSchema.deleted_at.is_(None))
         .order_by(UnsPayloadSchema.schema_name)
     )
     return list(result.scalars().all())
@@ -72,7 +72,7 @@ async def get_deleted_payload_schema(db: AsyncSession) -> list[UnsPayloadSchema]
     """取得所有 Soft-deleted 的 Schema Types。"""
     result = await db.execute(
         select(UnsPayloadSchema)
-        .where(UnsPayloadSchema.deleted_at != None)
+        .where(UnsPayloadSchema.deleted_at.is_not(None))
         .order_by(UnsPayloadSchema.deleted_at.desc())
     )
     return list(result.scalars().all())
@@ -111,7 +111,7 @@ async def hard_delete_payload_schema(db: AsyncSession, type_id: int) -> None:
 async def list_suggestions(db: AsyncSession) -> list[UnsPayloadSchema]:
     """列出所有建議的 Schema Types。"""
     result = await db.execute(
-        select(UnsPayloadSchema).where(UnsPayloadSchema.is_suggested == True).order_by(UnsPayloadSchema.created_at.desc())
+        select(UnsPayloadSchema).where(UnsPayloadSchema.is_suggested.is_(True)).order_by(UnsPayloadSchema.created_at.desc())
     )
     return list(result.scalars().all())
 

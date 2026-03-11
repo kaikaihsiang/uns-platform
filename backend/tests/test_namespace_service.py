@@ -76,12 +76,12 @@ async def test_move_node_live_migration(db_session):
     assert mounter.full_path == "SMT-Mounter-01"
     
     # Mapping (Live Migration)
-    stmt_map = select(TagSourceMapping).where(TagSourceMapping.tag_id == tag.tag_id, TagSourceMapping.active == True)
+    stmt_map = select(TagSourceMapping).where(TagSourceMapping.tag_id == tag.tag_id, TagSourceMapping.active.is_(True))
     new_mapping = (await db_session.execute(stmt_map)).scalar_one()
     assert new_mapping.mqtt_topic == "SMT-Mounter-01/Temp/T1"
     
     # Old Mapping should be inactive
-    stmt_old = select(TagSourceMapping).where(TagSourceMapping.tag_id == tag.tag_id, TagSourceMapping.active == False)
+    stmt_old = select(TagSourceMapping).where(TagSourceMapping.tag_id == tag.tag_id, TagSourceMapping.active.is_(False))
     old_mapping = (await db_session.execute(stmt_old)).scalar_one()
     assert old_mapping.mqtt_topic == "TaiwanPrecision/Taoyuan/SMT_Line_1/SMT-Mounter-01/Temp/T1"
     

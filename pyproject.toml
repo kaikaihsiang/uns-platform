@@ -3,11 +3,27 @@ line-length = 100
 target-version = "py313"
 
 [tool.ruff.lint]
+# E: pycodestyle, F: Pyflakes, I: isort, N: pep8-naming, B: flake8-bugbear
 select = ["E", "F", "I", "N", "B"]
-ignore = ["E501", "B904"] # Ignore long lines and explicit 'raise from' for now
+ignore = [
+    "E501", # Line too long
+    "B904", # raise ... from err
+    "E701", # Multiple statements on one line (colon) - Common in our internal logic
+    "B008", # Do not perform function call Depends in argument defaults
+    "E402", # Module level import not at top of file (handling circular imports)
+]
 
 [tool.ruff.lint.flake8-bugbear]
-extend-immutable-calls = ["fastapi.Depends", "fastapi.params.Depends", "fastapi.Query", "fastapi.params.Query", "fastapi.Path", "fastapi.params.Path", "fastapi.Body", "fastapi.params.Body"]
+extend-immutable-calls = [
+    "fastapi.Depends", 
+    "fastapi.params.Depends", 
+    "fastapi.Query", 
+    "fastapi.params.Query", 
+    "fastapi.Path", 
+    "fastapi.params.Path", 
+    "fastapi.Body", 
+    "fastapi.params.Body"
+]
 
 [tool.ruff.format]
 quote-style = "double"
