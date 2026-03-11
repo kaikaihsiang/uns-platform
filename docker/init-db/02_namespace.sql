@@ -63,6 +63,11 @@ COMMENT ON COLUMN uns_payload_schemas.fields IS 'JSONPath 提取規則陣列';
 
 -- ─── 加上 FK ─────────────────────────────────────────────────
 
-ALTER TABLE namespace_nodes
-    ADD CONSTRAINT fk_ns_schema
-    FOREIGN KEY (schema_id) REFERENCES uns_payload_schemas(schema_id);
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_ns_schema') THEN
+        ALTER TABLE namespace_nodes
+            ADD CONSTRAINT fk_ns_schema
+            FOREIGN KEY (schema_id) REFERENCES uns_payload_schemas(schema_id);
+    END IF;
+END $$;
