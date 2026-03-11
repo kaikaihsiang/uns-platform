@@ -1,0 +1,11 @@
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "B"]
+ignore = ["E501"] # Ignore long lines handled by ruff format
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
