@@ -109,6 +109,20 @@
 
 ---
 
+### 🚀 Future Optimization: 統一標籤與 Schema 規格 (Unified Tag & Schema Spec)
+
+**目標**: 簡化標籤定義流程，消除 `Tag.data_point` 與 `UnsPayloadSchema.fields` 之間的冗餘與不一致。
+
+#### 核心規格建議 (待開發):
+1. **取消 `Tag.data_point` 欄位**: 所有類別的來源定義全部回歸 `UnsPayloadSchema.fields`。
+2. **Telemetry 的特殊映射**: 在 Schema 定義中，讓 Telemetry 欄位的 `target_column` 預設為 `value`（標量數值）。
+3. **Tag 變成「實例 (Instance)」**:
+    * 一個 Tag 不再自己定義 `data_point`。
+    * Tag 必須選取所屬節點 Schema 中的某個「欄位定義」。
+    * **優點**: 使用者在 UI 上選取「溫度」這個欄位，系統自動知道來源是 `temp`、目標是 `ts_telemetry.value`、單位是 `°C`。
+
+---
+
 ## 3. 執行協議與回報機制 (Protocol)
 
 1. **認領與開始**: 請各 Agent 在接獲使用者指令啟動對應任務時，**優先查看此文件**以確保對焦。

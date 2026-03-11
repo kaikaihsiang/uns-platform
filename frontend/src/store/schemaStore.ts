@@ -8,6 +8,7 @@ interface SchemaState {
     isLoading: boolean;
     fetchSchemas: () => Promise<void>;
     fetchSuggestions: () => Promise<void>;
+    getSchemaById: (schemaId: number) => PayloadSchemaOut | undefined;
     approveSuggestion: (schemaId: number, category?: string) => Promise<boolean>;
     deleteSchema: (schemaId: number) => Promise<boolean>;
     createSchema: (data: PayloadSchemaCreate) => Promise<boolean>;
@@ -31,6 +32,10 @@ export const useSchemaStore = create<SchemaState>((set, get) => ({
         } finally {
             set({ isLoading: false });
         }
+    },
+
+    getSchemaById: (schemaId: number) => {
+        return get().schemas.find(s => s.schema_id === schemaId);
     },
 
     fetchSuggestions: async () => {

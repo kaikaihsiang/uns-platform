@@ -18,7 +18,9 @@ import {
     Popconfirm,
     Switch,
     ConfigProvider,
-    Badge
+    Badge,
+    Row,
+    Col
 } from 'antd';
 import {
     DatabaseOutlined,
@@ -48,10 +50,23 @@ import type { TreeDataNode } from 'antd';
 
 import { useNamespaceStore } from '../store/namespaceStore';
 import { useTagStore } from '../store/tagStore';
+import { useSchemaStore } from '../store/schemaStore';
 import type { NodeTreeOut, TagOut, TagCreate } from '../types/namespace';
 import '../pages/NamespaceEditor.css'; // Reuse layout CSS
 
 const { Title, Text, Paragraph } = Typography;
+
+// Helper to find a node by its full path in the nested tree
+function findNodeByPath(nodes: NodeTreeOut[], path: string): NodeTreeOut | null {
+    for (const node of nodes) {
+        if (node.full_path === path) return node;
+        if (node.children?.length) {
+            const found = findNodeByPath(node.children, path);
+            if (found) return found;
+        }
+    }
+    return null;
+}
 
 // Helper to convert tree map
 function toTreeData(nodes: NodeTreeOut[]): TreeDataNode[] {
@@ -72,6 +87,7 @@ function toTreeData(nodes: NodeTreeOut[]): TreeDataNode[] {
 export default function TagsOverview() {
     // Stores
     const { treeData, fetchTree, isLoading: isTreeLoading } = useNamespaceStore();
+    const { fetchSchemas, getSchemaById } = useSchemaStore();
     const {
         tags,
         currentTagValues,
@@ -85,6 +101,16 @@ export default function TagsOverview() {
 
     // Local state
     const [selectedPath, setSelectedPath] = useState<string | null>(null);
+    
+    // Derived state
+    const selectedNode = useMemo(() => 
+        selectedPath ? findNodeByPath(treeData, selectedPath) : null
+    , [treeData, selectedPath]);
+
+    const boundSchema = useMemo(() => 
+        selectedNode?.schema_id ? getSchemaById(selectedNode.schema_id) : null
+    , [selectedNode, getSchemaById]);
+
     const [recursive, setRecursive] = useState(false);
     const [createModalOpen, setCreateModalOpen] = useState(false);
     const [editingTag, setEditingTag] = useState<TagOut | null>(null);
@@ -92,10 +118,11 @@ export default function TagsOverview() {
     const [activeTag, setActiveTag] = useState<TagOut | null>(null);
     const [form] = Form.useForm();
 
-    // Init tree
+    // Init tree and schemas
     useEffect(() => {
         fetchTree();
-    }, [fetchTree]);
+        fetchSchemas();
+    }, [fetchTree, fetchSchemas]);
 
     // Tree select handler
     const handleSelect = useCallback((selectedKeys: React.Key[], _info: any) => {
@@ -517,131 +544,175 @@ export default function TagsOverview() {
                     </Card>
                 </div>
 
-                {/* Create / Edit Tag Modal */}
-                <Modal
-                    title={editingTag ? "編輯 Tag 資料點" : "註冊新的 Tag 資料點"}
-                    open={createModalOpen}
-                    onOk={handleFormSubmit}
-                    onCancel={() => {
-                        setCreateModalOpen(false);
-                        setEditingTag(null);
-                    }}
-                    okText={editingTag ? "更新" : "建立"}
-                    cancelText="取消"
-                >
-                    <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
-                        <Form.Item label="Asset Path (綁定節點)" name="asset_path">
-                            <Input disabled />
-                        </Form.Item>
-
-                        <Form.Item
-                            label="顯示名稱 (Display Name)"
-                            name="display_name"
-                            rules={[{ required: true, message: '必填' }]}
-                        >
-                            <Input placeholder="例如：設備溫度" />
-                        </Form.Item>
-
-                        <div style={{ display: 'flex', gap: 16 }}>
-                            <Form.Item
-                                label="分類 (Category)"
-                                name="category"
-                                style={{ flex: 1 }}
-                                rules={[{ required: true }]}
-                            >
-                                <Select>
-                                    <Select.Option value="telemetry">遙測數值 (Telemetry)</Select.Option>
-                                    <Select.Option value="status">設備狀態 (Status)</Select.Option>
-                                    <Select.Option value="alarm">警報 (Alarm)</Select.Option>
-                                    <Select.Option value="event">事件 (Event)</Select.Option>
-                                    <Select.Option value="measurement">量測品管 (Measurement)</Select.Option>
-                                </Select>
-                            </Form.Item>
-
-                            <Form.Item noStyle dependencies={['category']}>
-                                {({ getFieldValue }) => {
-                                    const category = getFieldValue('category');
-                                    const isTelemetry = !category || category === 'telemetry';
-
-                                    const categoryColumns: Record<string, { label: string, value: string }[]> = {
-                                        status: [
-                                            { label: 'state_code', value: 'state_code' },
-                                            { label: 'sub_state_code', value: 'sub_state_code' },
-                                            { label: 'mode', value: 'mode' },
-                                            { label: 'code_category', value: 'code_category' }
-                                        ],
-                                        alarm: [
-                                            { label: 'alarm_id', value: 'alarm_id' },
-                                            { label: 'alarm_code', value: 'alarm_code' },
-                                            { label: 'sub_alarm_code', value: 'sub_alarm_code' },
-                                            { label: 'severity', value: 'severity' },
-                                            { label: 'message', value: 'message' },
-                                            { label: 'alarm_status', value: 'alarm_status' },
-                                            { label: 'value', value: 'value' },
-                                            { label: 'threshold', value: 'threshold' }
-                                        ],
-                                        event: [
-                                            { label: 'event_id', value: 'event_id' },
-                                            { label: 'event_code', value: 'event_code' },
-                                            { label: 'sub_event_code', value: 'sub_event_code' },
-                                            { label: 'result', value: 'result' }
-                                        ],
-                                        measurement: [
-                                            { label: 'value', value: 'value' },
-                                            { label: 'spec_upper', value: 'spec_upper' },
-                                            { label: 'spec_lower', value: 'spec_lower' },
-                                            { label: 'target_value', value: 'target_value' },
-                                            { label: 'result', value: 'result' },
-                                            { label: 'lot_id', value: 'lot_id' },
-                                            { label: 'sample_id', value: 'sample_id' },
-                                            { label: 'sample_position', value: 'sample_position' },
-                                            { label: 'inspector', value: 'inspector' }
-                                        ]
-                                    };
-
-                                    return (
-                                        <Form.Item
-                                            label={isTelemetry ? "資料點欄位 (Data Point)" : "目標欄位 (Target Column)"}
-                                            name="data_point"
-                                            style={{ flex: 1 }}
-                                            tooltip="將對應到資料表中的特定欄位或 JSON key"
-                                        >
-                                            {isTelemetry ? (
-                                                <Input placeholder="選填，例如：temperature" />
-                                            ) : (
-                                                <Select
-                                                    placeholder="請選擇對應欄位"
-                                                    options={categoryColumns[category] || []}
-                                                    allowClear
-                                                />
-                                            )}
-                                        </Form.Item>
-                                    );
+                            {/* Create / Edit Tag Modal */}
+                            <Modal
+                                title={editingTag ? "編輯 Tag 資料點" : "註冊新的 Tag 資料點"}
+                                open={createModalOpen}
+                                onOk={handleFormSubmit}
+                                onCancel={() => {
+                                    setCreateModalOpen(false);
+                                    setEditingTag(null);
                                 }}
-                            </Form.Item>
-                        </div>
-
-                        <div style={{ display: 'flex', gap: 16 }}>
-                            <Form.Item label="型別 (Data Type)" name="data_type" style={{ flex: 1 }}>
-                                <Select>
-                                    <Select.Option value="float">浮點數 (Float)</Select.Option>
-                                    <Select.Option value="integer">整數 (Integer)</Select.Option>
-                                    <Select.Option value="string">字串 (String)</Select.Option>
-                                    <Select.Option value="boolean">布林值 (Boolean)</Select.Option>
-                                </Select>
-                            </Form.Item>
-
-                            <Form.Item label="單位 (Unit)" name="unit" style={{ flex: 1 }}>
-                                <Input placeholder="例如：°C, %, mm" />
-                            </Form.Item>
-                        </div>
-
-                        <Form.Item label="備註描述" name="description">
-                            <Input.TextArea rows={2} />
-                        </Form.Item>
-                    </Form>
-                </Modal>
-
+                                okText={editingTag ? "更新" : "建立"}
+                                cancelText="取消"
+                                width={650}
+                            >
+                                <Form form={form} layout="vertical" style={{ marginTop: 8 }}>
+                                    <div style={{ background: 'rgba(255,255,255,0.02)', padding: '12px 16px', borderRadius: 8, marginBottom: 20, border: '1px solid rgba(255,255,255,0.05)' }}>
+                                        <Space direction="vertical" size={2}>
+                                            <Text type="secondary" style={{ fontSize: 11 }}>Asset Context:</Text>
+                                            <Text strong style={{ fontSize: 13 }}><FolderOutlined /> {selectedPath}</Text>
+                                            {boundSchema && (
+                                                <Text type="success" style={{ fontSize: 11 }}>
+                                                    <DatabaseOutlined /> Bound Schema: {boundSchema.schema_name} ({boundSchema.schema_category})
+                                                </Text>
+                                            )}
+                                        </Space>
+                                    </div>
+                
+                                    <Form.Item
+                                        label="顯示名稱 (Display Name)"
+                                        name="display_name"
+                                        rules={[{ required: true, message: '請輸入顯示名稱' }]}
+                                    >
+                                        <Input placeholder="例如：設備溫度、主軸轉速" />
+                                    </Form.Item>
+                
+                                    <Row gutter={16}>
+                                        <Col span={12}>
+                                            <Form.Item
+                                                label="分類 (Category)"
+                                                name="category"
+                                                rules={[{ required: true }]}
+                                            >
+                                                <Select 
+                                                    onChange={() => form.setFieldValue('data_point', null)}
+                                                >
+                                                    <Select.Option value="telemetry">遙測數值 (Telemetry)</Select.Option>
+                                                    <Select.Option value="status">設備狀態 (Status)</Select.Option>
+                                                    <Select.Option value="alarm">警報紀錄 (Alarm)</Select.Option>
+                                                    <Select.Option value="event">生產事件 (Event)</Select.Option>
+                                                    <Select.Option value="measurement">量測品管 (Measurement)</Select.Option>
+                                                </Select>
+                                            </Form.Item>
+                                        </Col>
+                                        <Col span={12}>
+                                            <Form.Item noStyle dependencies={['category']}>
+                                                {({ getFieldValue }) => {
+                                                    const category = getFieldValue('category')?.toLowerCase();
+                                                    const isTelemetry = category === 'telemetry';
+                                                    const isEditing = !!editingTag;
+                                                    
+                                                    // 只有 Telemetry 在編輯模式下可以編輯 data_point
+                                                    const isDataPointDisabled = isEditing && !isTelemetry;
+                                                    
+                                                    const availableFields = boundSchema?.fields || [];
+                                                    const handleFieldChange = (val: string) => {
+                                                        const field = availableFields.find(f => f.name === val);
+                                                        if (field) {
+                                                            if (!form.getFieldValue('display_name')) {
+                                                                form.setFieldValue('display_name', field.name);
+                                                            }
+                                                            form.setFieldValue('data_type', field.type || 'float');
+                                                            form.setFieldValue('unit', field.unit || null);
+                                                        }
+                                                    };
+                
+                                                    return (
+                                                        <Form.Item
+                                                            label={isTelemetry ? "主題後綴 (Topic Suffix / Data Point)" : "來源欄位 (Source Field / JSON Key)"}
+                                                            name="data_point"
+                                                            rules={[{ required: !isTelemetry, message: '必填' }]}
+                                                            tooltip={isTelemetry ? "決定 MQTT Topic 結尾" : "Payload JSON 中的 Key"}
+                                                        >
+                                                            {(isTelemetry) ? (
+                                                                <Input 
+                                                                    placeholder="例如：temperature" 
+                                                                    disabled={isDataPointDisabled}
+                                                                />
+                                                            ) : (
+                                                                availableFields.length > 0 ? (
+                                                                    <Select 
+                                                                        placeholder="從 Schema 選取欄位" 
+                                                                        onChange={handleFieldChange}
+                                                                        disabled={isDataPointDisabled}
+                                                                        options={availableFields.map(f => ({
+                                                                            label: `${f.name} -> [${f.target_column || 'details'}]`,
+                                                                            value: f.name
+                                                                        }))}
+                                                                    />
+                                                                ) : (
+                                                                    <Input 
+                                                                        placeholder="輸入 JSON Key" 
+                                                                        disabled={isDataPointDisabled}
+                                                                    />
+                                                                )
+                                                            )}
+                                                        </Form.Item>
+                                                    );
+                                                }}
+                                            </Form.Item>
+                                        </Col>
+                                    </Row>
+                
+                                    {/* Live MQTT Preview */}
+                                    <Form.Item noStyle dependencies={['category', 'data_point']}>
+                                        {({ getFieldValue }) => {
+                                            const cat = getFieldValue('category') || 'telemetry';
+                                            const dp = getFieldValue('data_point');
+                                            let topic = `${selectedPath}/${cat}`;
+                                            if (cat === 'telemetry' && dp) topic += `/${dp}`;
+                                            
+                                            return (
+                                                <div style={{ marginBottom: 20, padding: '8px 12px', background: 'rgba(0,0,0,0.2)', borderRadius: 4, borderLeft: '3px solid var(--color-primary)' }}>
+                                                    <Text type="secondary" style={{ fontSize: 10, display: 'block', marginBottom: 4 }}>MQTT Topic Preview:</Text>
+                                                    <Text code style={{ color: 'var(--color-primary)', fontSize: 12 }}>{topic}</Text>
+                                                </div>
+                                            );
+                                        }}
+                                    </Form.Item>
+                
+                                    <Row gutter={16}>
+                                        <Col span={12}>
+                                            <Form.Item label="型別 (Data Type)" name="data_type" initialValue="float">
+                                                <Select>
+                                                    <Select.Option value="float">浮點數 (Float)</Select.Option>
+                                                    <Select.Option value="integer">整數 (Integer)</Select.Option>
+                                                    <Select.Option value="string">字串 (String)</Select.Option>
+                                                    <Select.Option value="boolean">布林值 (Boolean)</Select.Option>
+                                                    <Select.Option value="json">JSON 物件</Select.Option>
+                                                </Select>
+                                            </Form.Item>
+                                        </Col>
+                                        <Col span={12}>
+                                            <Form.Item label="單位 (Unit)" name="unit">
+                                                <Input placeholder="例如：°C, %, mm" />
+                                            </Form.Item>
+                                        </Col>
+                                    </Row>
+                
+                                    <Form.Item label="備註描述" name="description">
+                                        <Input.TextArea rows={2} placeholder="描述此數據點的用途..." />
+                                    </Form.Item>
+                
+                                    <Form.Item noStyle dependencies={['category', 'data_point']}>
+                                        {({ getFieldValue }) => {
+                                            const cat = getFieldValue('category');
+                                            const dp = getFieldValue('data_point');
+                                            const field = boundSchema?.fields.find(f => f.name === dp);
+                                            const target = field?.target_column || (cat === 'telemetry' ? 'value' : 'details');
+                                            
+                                            return (
+                                                <div style={{ textAlign: 'right' }}>
+                                                    <Text type="secondary" style={{ fontSize: 11 }}>
+                                                        Data Flow: Source[{dp || '*'}] ➔ Database Table[ts_{cat}s].Column[<Text strong style={{ color: '#aaa' }}>{target}</Text>]
+                                                    </Text>
+                                                </div>
+                                            );
+                                        }}
+                                    </Form.Item>
+                                </Form>
+                            </Modal>
                 {/* History Drawer */}
                 <Drawer
                     title={

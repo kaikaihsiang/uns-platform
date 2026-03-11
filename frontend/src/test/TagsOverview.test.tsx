@@ -1,8 +1,22 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import TagsOverview from '../pages/TagsOverview';
-import { useTagStore } from '../store/tagStore';
-import { useNamespaceStore } from '../store/namespaceStore';
+
+// 0. Global Mocks for Ant Design / JSDOM issues
+global.matchMedia = global.matchMedia || function() {
+    return {
+        matches: false,
+        addListener: function() {},
+        removeListener: function() {}
+    };
+};
+
+class ResizeObserver {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+}
+global.ResizeObserver = ResizeObserver;
 
 // 1. Mock Stores
 vi.mock('../store/tagStore', () => ({
@@ -11,6 +25,10 @@ vi.mock('../store/tagStore', () => ({
 
 vi.mock('../store/namespaceStore', () => ({
     useNamespaceStore: vi.fn(),
+}));
+
+vi.mock('../store/schemaStore', () => ({
+    useSchemaStore: vi.fn(),
 }));
 
 // 2. Mock Recharts (Avoid rendering complexity in JSDOM)
@@ -28,6 +46,10 @@ vi.mock('recharts', () => ({
     Cell: () => null,
     ReferenceLine: () => null,
 }));
+
+import { useTagStore } from '../store/tagStore';
+import { useNamespaceStore } from '../store/namespaceStore';
+import { useSchemaStore } from '../store/schemaStore';
 
 describe('TagsOverview Categorical History Trends', () => {
     const mockTags = [
@@ -55,6 +77,11 @@ describe('TagsOverview Categorical History Trends', () => {
             isLoading: false,
             fetchTagsByNode: mockFetchTags,
             fetchTagValues: mockFetchTagValues,
+        });
+
+        (useSchemaStore as any).mockReturnValue({
+            fetchSchemas: vi.fn(),
+            getSchemaById: vi.fn(),
         });
     });
 
@@ -147,3 +174,77 @@ describe('TagsOverview Categorical History Trends', () => {
         });
     });
 });
+
+describe('TagsOverview Edit Permissions', () => {
+    const mockTags = [
+        { tag_id: 1, display_name: 'Temp', category: 'telemetry', asset_path: 'Line1/Printer', data_type: 'float', data_point: 'temp1' },
+        { tag_id: 2, display_name: 'Alarm', category: 'alarm', asset_path: 'Line1/Printer', data_type: 'string', data_point: 'main_alarm' },
+    ];
+
+    const mockFetchTags = vi.fn();
+    const mockUpdateTag = vi.fn();
+
+    beforeEach(() => {
+        vi.clearAllMocks();
+        (useTagStore as any).mockReturnValue({
+            tags: mockTags,
+            currentTagValues: [],
+            isLoading: false,
+            fetchTagsByNode: mockFetchTags,
+            updateTag: mockUpdateTag,
+        });
+        (useNamespaceStore as any).mockReturnValue({
+            treeData: [
+                { name: 'Printer', full_path: 'Line1/Printer', node_type: 'topic' }
+            ],
+            fetchTree: vi.fn(),
+            isLoading: false,
+        });
+        (useSchemaStore as any).mockReturnValue({
+            fetchSchemas: vi.fn(),
+            getSchemaById: vi.fn(),
+        });
+    });
+
+    it('allows editing Data Point for telemetry category', async () => {
+        render(<TagsOverview />);
+        
+        // Find Edit button for Temp (telemetry)
+        const editButtons = screen.getAllByRole('button', { name: /edit/i });
+        fireEvent.click(editButtons[0]);
+
+        // Expect Modal to be open
+        expect(screen.getByText('編輯 Tag 資料點')).toBeInTheDocument();
+        
+        // Data Point should be editable (Input not disabled)
+        const dataPointInput = screen.getByLabelText(/主題後綴/);
+        expect(dataPointInput).not.toBeDisabled();
+        
+        // Other fields like Display Name should be editable
+        const displayNameInput = screen.getByLabelText(/顯示名稱/);
+        expect(displayNameInput).not.toBeDisabled();
+    });
+
+    it('restricts editing Data Point for non-telemetry categories (e.g. alarm)', async () => {
+        render(<TagsOverview />);
+        
+        // Find Edit button for Alarm (non-telemetry)
+        const editButtons = screen.getAllByRole('button', { name: /edit/i });
+        fireEvent.click(editButtons[1]);
+
+        expect(screen.getByText('編輯 Tag 資料點')).toBeInTheDocument();
+        
+        // Label should be "來源欄位"
+        expect(screen.getByText('來源欄位 (Source Field / JSON Key)')).toBeInTheDocument();
+        
+        // Data Point should be disabled in edit mode for non-telemetry
+        // Note: Depending on whether schema is bound, it might be a Select or Input
+        const dataPointField = screen.getByLabelText(/來源欄位/);
+        expect(dataPointField).toBeDisabled();
+        
+        // But Category and Description should be editable
+        const categorySelect = screen.getByLabelText(/分類/);
+        expect(categorySelect).not.toBeDisabled();
+    });
+});
+
