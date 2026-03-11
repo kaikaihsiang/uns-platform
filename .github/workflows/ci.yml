@@ -18,7 +18,7 @@ jobs:
       - name: Install Ruff
         run: pip install ruff
       - name: Run Ruff
-        run: ruff check .
+        run: ruff check . --exclude archive
 
   backend-tests:
     runs-on: ubuntu-latest
@@ -49,25 +49,17 @@ jobs:
         env:
           PGPASSWORD: uns_dev_password
         run: |
-          # Install psql client
           sudo apt-get update && sudo apt-get install -y postgresql-client
-          
-          # Wait for DB to be ready (additional check)
           until pg_isready -h localhost -p 5432 -U uns_admin; do
             echo "Waiting for database..."
             sleep 2
           done
-
-          # Execute all init scripts in order
           for f in docker/init-db/*.sql; do
             echo "Executing $f..."
             psql -h localhost -U uns_admin -d uns_test -f "$f"
           done
-          
-          # Define test helper functions (like truncate_all_tables_test)
           echo "Defining test helpers..."
           psql -h localhost -U uns_admin -d uns_test -f ops/init_test_db.sql
-
       - name: Run tests
         env:
           DATABASE_URL: postgresql+asyncpg://uns_admin:uns_dev_password@localhost:5432/uns_test
@@ -85,8 +77,10 @@ jobs:
           python-version: '3.13'
       - name: Install dependencies
         run: |
-          pip install pytest pytest-asyncio jsonpath-ng psycopg2-binary httpx
+          pip install pytest pytest-asyncio jsonpath-ng psycopg2-binary httpx gmqtt
       - name: Run tests
+        env:
+          PYTHONPATH: ${{ github.workspace }}/data-engine
         run: |
           pytest data-engine/tests
 
