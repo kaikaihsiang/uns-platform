@@ -88,5 +88,8 @@ def sample_time():
 @pytest.fixture
 def sample_payloads():
     """Load standard payloads for testing."""
-    with open("../docs/payload_samples.json", "r") as f:
+    import os
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    path = os.path.join(base_dir, "../../docs/payload_samples.json")
+    with open(path, "r") as f:
         return json.load(f)
