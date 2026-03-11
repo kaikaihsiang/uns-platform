@@ -1,10 +1,9 @@
 import asyncio
-import os
-from sqlalchemy import select
-from app.core.database import get_db
-from app.models import Tag, TagSourceMapping, NamespaceNode, UnsPayloadSchema
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+
 from app.core.config import settings
+from app.models import NamespaceNode, Tag, TagSourceMapping, UnsPayloadSchema
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 # Manual Engine Setup for script
 engine = create_async_engine(settings.database_url)
@@ -19,7 +18,7 @@ async def diagnose_tag_7():
             print("Tag 7 not found in Tag table.")
             return
         
-        print(f"--- Tag Table Info (ID: 7) ---")
+        print("--- Tag Table Info (ID: 7) ---")
         print(f"Display Name: {tag.display_name}")
         print(f"Data Point: {tag.data_point}")
         print(f"Category: {tag.category}")
@@ -32,7 +31,7 @@ async def diagnose_tag_7():
             print("\n[!] No TagSourceMapping found for Tag 7.")
             return
         
-        print(f"\n--- Mapping Info ---")
+        print("\n--- Mapping Info ---")
         print(f"MQTT Topic: {mapping.mqtt_topic}")
         
         # 3. Check Node & Schema
@@ -43,7 +42,7 @@ async def diagnose_tag_7():
             return
         
         if not node.schema_id:
-            print(f"\n[!] Node found but no Schema assigned.")
+            print("\n[!] Node found but no Schema assigned.")
             return
             
         schema_res = await db.execute(select(UnsPayloadSchema).where(UnsPayloadSchema.schema_id == node.schema_id))

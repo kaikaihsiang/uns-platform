@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import {
     Tree,
     Table,
@@ -16,7 +16,9 @@ import {
     Empty,
     Space,
     Popconfirm,
-    Switch
+    Switch,
+    ConfigProvider,
+    Badge
 } from 'antd';
 import {
     DatabaseOutlined,
@@ -28,6 +30,20 @@ import {
     ApartmentOutlined,
     PlusOutlined,
 } from '@ant-design/icons';
+import {
+    ResponsiveContainer,
+    LineChart,
+    Line,
+    XAxis,
+    YAxis,
+    CartesianGrid,
+    Tooltip,
+    Legend,
+    ScatterChart,
+    Scatter,
+    Cell,
+    ReferenceLine
+} from 'recharts';
 import type { TreeDataNode } from 'antd';
 
 import { useNamespaceStore } from '../store/namespaceStore';
@@ -266,243 +282,392 @@ export default function TagsOverview() {
         }
     ];
 
-    const historyColumns = [
-        {
-            title: '時間 (Time)',
-            dataIndex: 'time',
-            key: 'time',
-            render: (t: string) => new Date(t).toLocaleString()
-        },
-        {
-            title: '數值 (Value)',
-            dataIndex: 'value',
-            key: 'value',
-            render: (_: any, record: any) => record.value ?? record.value_text ?? <Text type="secondary">null</Text>
-        },
-        {
-            title: '品質 (Quality)',
-            dataIndex: 'quality',
-            key: 'quality',
-            render: (q: string) => (
-                <AntTag color={q === 'good' ? 'success' : q === 'bad' ? 'error' : 'warning'}>
-                    {q}
-                </AntTag>
-            )
+    const historyColumns = useMemo(() => {
+        const base = [
+            {
+                title: '時間 (Time)',
+                dataIndex: 'time',
+                key: 'time',
+                width: 160,
+                render: (t: string) => <span style={{ fontSize: 11 }}>{new Date(t).toLocaleString()}</span>,
+                sorter: (a: any, b: any) => new Date(a.time).getTime() - new Date(b.time).getTime(),
+                defaultSortOrder: 'descend' as const,
+            },
+        ];
+
+        const contextCols = [
+            { title: 'Lot ID', dataIndex: 'lot_id', key: 'lot_id', width: 100, render: (v: any) => <Text style={{ fontSize: 11 }}>{v || '-'}</Text>, sorter: (a: any, b: any) => (a.lot_id || '').localeCompare(b.lot_id || '') },
+            { title: 'Run ID', dataIndex: 'run_id', key: 'run_id', width: 70, render: (v: any) => <Text type="secondary" style={{ fontSize: 11 }}>{v || '-'}</Text>, sorter: (a: any, b: any) => (a.run_id || 0) - (b.run_id || 0) },
+        ];
+
+        const category = activeTag?.category?.toLowerCase() || 'telemetry';
+
+        if (category === 'status') {
+            return [
+                ...base,
+                ...contextCols,
+                { title: '狀態碼', dataIndex: 'state_code', render: (c: string) => <AntTag color="orange" style={{ fontSize: 10 }}>{c}</AntTag>, sorter: (a: any, b: any) => (a.state_code || '').localeCompare(b.state_code || '') },
+                { title: '子狀態', dataIndex: 'sub_state_code', render: (c: string) => c || '-', sorter: (a: any, b: any) => (a.sub_state_code || '').localeCompare(b.sub_state_code || '') },
+                { title: '模式', dataIndex: 'mode', render: (m: string) => <AntTag color="blue" style={{ fontSize: 10 }}>{m}</AntTag>, sorter: (a: any, b: any) => (a.mode || '').localeCompare(b.mode || '') },
+                { title: '詳情', dataIndex: 'details', render: (d: any) => d ? <Text type="secondary" style={{ fontSize: 10 }}>{JSON.stringify(d)}</Text> : '-' },
+            ];
         }
-    ];
 
-    return (
-        <div className="namespace-editor">
-            {/* ── Left: Tree Panel ── */}
-            <div className="namespace-tree-panel">
-                <div className="namespace-tree-header">
-                    <h3><ApartmentOutlined /> Namespace 範圍</h3>
-                </div>
-                <div className="namespace-tree-body">
-                    <Spin spinning={isTreeLoading}>
-                        {antTreeData.length > 0 ? (
-                            <Tree
-                                treeData={antTreeData}
-                                showIcon
-                                defaultExpandAll
-                                onSelect={handleSelect}
-                            />
-                        ) : (
-                            <Empty description="尚無節點資料" style={{ marginTop: 80 }} />
-                        )}
-                    </Spin>
-                </div>
-            </div>
+        if (category === 'alarm') {
+            return [
+                ...base,
+                ...contextCols,
+                { title: 'ID', dataIndex: 'alarm_id', width: 80, sorter: (a: any, b: any) => (a.alarm_id || '').localeCompare(b.alarm_id || '') },
+                { title: '代碼', dataIndex: 'alarm_code', sorter: (a: any, b: any) => (a.alarm_code || '').localeCompare(b.alarm_code || '') },
+                { title: '子代碼', dataIndex: 'sub_alarm_code', sorter: (a: any, b: any) => (a.sub_alarm_code || '').localeCompare(b.sub_alarm_code || '') },
+                { title: '嚴重度', dataIndex: 'severity', render: (s: string) => <AntTag color="red" style={{ fontSize: 10 }}>{s}</AntTag>, sorter: (a: any, b: any) => (a.severity || '').localeCompare(b.severity || '') },
+                { title: '訊息', dataIndex: 'message', ellipsis: true },
+                { title: '狀態', dataIndex: 'alarm_status', render: (st: string) => <Badge status={st === 'active' ? 'error' : 'success'} text={<span style={{ fontSize: 11 }}>{st}</span>} />, sorter: (a: any, b: any) => (a.alarm_status || '').localeCompare(b.alarm_status || '') },
+                { title: '數值/閾值', render: (_: any, r: any) => <span style={{ fontSize: 11 }}>{r.value ?? '-'} / {r.threshold ?? '-'}</span>, sorter: (a: any, b: any) => (a.value || 0) - (b.value || 0) },
+                { title: '詳情', dataIndex: 'details', render: (d: any) => d ? <Text type="secondary" style={{ fontSize: 10 }}>{JSON.stringify(d)}</Text> : '-' },
+            ];
+        }
 
-            {/* ── Right: Detail Panel (Tag List) ── */}
-            <div className="namespace-detail-panel" style={{ padding: 24, overflow: 'auto' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-                    <div>
-                        <Title level={2} style={{ margin: 0 }}>
-                            <DatabaseOutlined style={{ marginRight: 12, color: 'var(--color-primary)' }} />
-                            Tag 總覽
-                        </Title>
-                        <Paragraph type="secondary" style={{ marginTop: 8 }}>
-                            {selectedPath ? `目前檢視範圍：${selectedPath}` : '請從左側選擇 Namespace 節點以檢視關聯的 Tags'}
-                        </Paragraph>
+        if (category === 'event') {
+            return [
+                ...base,
+                ...contextCols,
+                { title: 'ID', dataIndex: 'event_id', width: 80, sorter: (a: any, b: any) => (a.event_id || '').localeCompare(b.event_id || '') },
+                { title: '事件代碼', dataIndex: 'event_code', render: (c: string) => <Text strong style={{ fontSize: 11 }}>{c}</Text>, sorter: (a: any, b: any) => (a.event_code || '').localeCompare(b.event_code || '') },
+                { title: '子代碼', dataIndex: 'sub_event_code', sorter: (a: any, b: any) => (a.sub_event_code || '').localeCompare(b.sub_event_code || '') },
+                { title: '結果', dataIndex: 'result', render: (r: string) => r || '-', sorter: (a: any, b: any) => (a.result || '').localeCompare(b.result || '') },
+                { title: '詳情', dataIndex: 'details', render: (d: any) => d ? <Text type="secondary" style={{ fontSize: 10 }}>{JSON.stringify(d)}</Text> : '-' },
+            ];
+        }
+
+        if (category === 'measurement') {
+            return [
+                ...base,
+                ...contextCols,
+                { title: 'Step', dataIndex: 'step_id', width: 80, sorter: (a: any, b: any) => (a.step_id || '').localeCompare(b.step_id || '') },
+                { title: '樣本 ID', dataIndex: 'sample_id', render: (s: any) => <Text strong style={{ fontSize: 11 }}>{s}</Text>, sorter: (a: any, b: any) => (a.sample_id || '').localeCompare(b.sample_id || '') },
+                { title: '數值', dataIndex: 'value', render: (v: number) => <Text strong style={{ fontSize: 11 }}>{v} {activeTag?.unit}</Text>, sorter: (a: any, b: any) => (a.value || 0) - (b.value || 0) },
+                { title: '目標', dataIndex: 'target_value', sorter: (a: any, b: any) => (a.target_value || 0) - (b.target_value || 0) },
+                { title: '結果', dataIndex: 'result', render: (res: string) => <AntTag color={res?.toLowerCase() === 'fail' ? 'red' : 'green'} style={{ fontSize: 10 }}>{res || 'PASS'}</AntTag>, sorter: (a: any, b: any) => (a.result || '').localeCompare(b.result || '') },
+                { title: '規格', render: (_: any, r: any) => <Text type="secondary" style={{ fontSize: 10 }}>{r.spec_lower || '-'} / {r.spec_upper || '-'}</Text> },
+                { title: '檢驗員', dataIndex: 'inspector', sorter: (a: any, b: any) => (a.inspector || '').localeCompare(b.inspector || '') },
+                { title: 'Context', dataIndex: 'context', render: (c: any) => c ? <Text type="secondary" style={{ fontSize: 10 }}>{JSON.stringify(c)}</Text> : '-' },
+                { title: '詳情', dataIndex: 'details', render: (d: any) => d ? <Text type="secondary" style={{ fontSize: 10 }}>{JSON.stringify(d)}</Text> : '-' },
+            ];
+        }
+
+        // Default / Telemetry
+        return [
+            ...base,
+            ...contextCols,
+            {
+                title: '數值 (Value)',
+                dataIndex: 'value',
+                key: 'value',
+                render: (v: any, record: any) => {
+                    const displayVal = v ?? record.value_text ?? (record.value_json ? 'JSON' : null);
+                    return <Text strong style={{ fontSize: 11 }}>{displayVal ?? <Text type="secondary">null</Text>}</Text>;
+                },
+                sorter: (a: any, b: any) => (a.value || 0) - (b.value || 0)
+            },
+            {
+                title: '品質',
+                dataIndex: 'quality',
+                key: 'quality',
+                render: (q: string) => (
+                    <AntTag color={q === 'good' ? 'success' : 'warning'} style={{ fontSize: 10 }}>
+                        {q}
+                    </AntTag>
+                ),
+                sorter: (a: any, b: any) => (a.quality || '').localeCompare(b.quality || '')
+            }
+        ];
+    }, [activeTag]);
+
+    const renderHistoryContent = () => {
+        if (!currentTagValues.length) return <Empty description="無歷史數據" />;
+
+        const category = activeTag?.category?.toLowerCase() || 'telemetry';
+
+        if (category === 'telemetry' || category === 'measurement') {
+            const chartData = [...currentTagValues].reverse().map(v => ({
+                time: new Date(v.time).toLocaleTimeString(),
+                value: v.value,
+                usl: (v as any).spec_upper,
+                lsl: (v as any).spec_lower,
+                result: (v as any).result
+            }));
+
+            return (
+                <Space direction="vertical" style={{ width: '100%' }} size="large">
+                    <div style={{ height: 300, width: '100%', background: 'rgba(255,255,255,0.02)', padding: 16, borderRadius: 8 }}>
+                        <ResponsiveContainer width="100%" height="100%">
+                            {category === 'telemetry' ? (
+                                <LineChart data={chartData}>
+                                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                                    <XAxis dataKey="time" fontSize={10} stroke="rgba(255,255,255,0.3)" />
+                                    <YAxis fontSize={10} stroke="rgba(255,255,255,0.3)" unit={activeTag?.unit} />
+                                    <Tooltip contentStyle={{ background: '#141414', border: '1px solid #333', fontSize: 11 }} />
+                                    <Legend />
+                                    <Line type="monotone" dataKey="value" name={activeTag?.display_name} stroke="#1890ff" dot={false} />
+                                </LineChart>
+                            ) : (
+                                <ScatterChart>
+                                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                                    <XAxis dataKey="time" fontSize={10} />
+                                    <YAxis domain={['auto', 'auto']} fontSize={10} unit={activeTag?.unit} />
+                                    <Tooltip cursor={{ strokeDasharray: '3 3' }} />
+                                    <Legend />
+                                    {chartData[0]?.usl && <ReferenceLine y={chartData[0].usl} label="USL" stroke="red" strokeDasharray="3 3" />}
+                                    {chartData[0]?.lsl && <ReferenceLine y={chartData[0].lsl} label="LSL" stroke="red" strokeDasharray="3 3" />}
+                                    <Scatter name="量測值" data={chartData}>
+                                        {chartData.map((entry, index) => (
+                                            <Cell key={`cell-${index}`} fill={entry.result?.toLowerCase() === 'fail' ? '#ff4d4f' : '#52c41a'} />
+                                        ))}
+                                    </Scatter>
+                                </ScatterChart>
+                            )}
+                        </ResponsiveContainer>
                     </div>
-                    <Space size="large">
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <Text type="secondary">包括子節點</Text>
-                            <Switch checked={recursive} onChange={setRecursive} />
-                        </div>
-                        {selectedPath && (
-                            <Button type="primary" icon={<PlusOutlined />} onClick={handleCreateOpen}>
-                                註冊新 Tag
-                            </Button>
-                        )}
-                    </Space>
-                </div>
-
-                <Card bodyStyle={{ padding: 0 }} bordered={false}>
-                    <Table
-                        columns={columns}
-                        dataSource={tags}
-                        rowKey="tag_id"
-                        loading={isTagLoading}
-                        pagination={{ pageSize: 15 }}
-                        locale={{ emptyText: selectedPath ? '此節點下無 Tag' : '請先選擇節點' }}
-                    />
-                </Card>
-            </div>
-
-            {/* Create / Edit Tag Modal */}
-            <Modal
-                title={editingTag ? "編輯 Tag 資料點" : "註冊新的 Tag 資料點"}
-                open={createModalOpen}
-                onOk={handleFormSubmit}
-                onCancel={() => {
-                    setCreateModalOpen(false);
-                    setEditingTag(null);
-                }}
-                okText={editingTag ? "更新" : "建立"}
-                cancelText="取消"
-            >
-                <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
-                    <Form.Item label="Asset Path (綁定節點)" name="asset_path">
-                        <Input disabled />
-                    </Form.Item>
-
-                    <Form.Item
-                        label="顯示名稱 (Display Name)"
-                        name="display_name"
-                        rules={[{ required: true, message: '必填' }]}
-                    >
-                        <Input placeholder="例如：設備溫度" />
-                    </Form.Item>
-
-                    <div style={{ display: 'flex', gap: 16 }}>
-                        <Form.Item
-                            label="分類 (Category)"
-                            name="category"
-                            style={{ flex: 1 }}
-                            rules={[{ required: true }]}
-                        >
-                            <Select>
-                                <Select.Option value="telemetry">遙測數值 (Telemetry)</Select.Option>
-                                <Select.Option value="status">設備狀態 (Status)</Select.Option>
-                                <Select.Option value="alarm">警報 (Alarm)</Select.Option>
-                                <Select.Option value="event">事件 (Event)</Select.Option>
-                                <Select.Option value="measurement">量測品管 (Measurement)</Select.Option>
-                            </Select>
-                        </Form.Item>
-
-                        <Form.Item noStyle dependencies={['category']}>
-                            {({ getFieldValue }) => {
-                                const category = getFieldValue('category');
-                                const isTelemetry = !category || category === 'telemetry';
-
-                                const categoryColumns: Record<string, { label: string, value: string }[]> = {
-                                    status: [
-                                        { label: 'state_code', value: 'state_code' },
-                                        { label: 'sub_state_code', value: 'sub_state_code' },
-                                        { label: 'mode', value: 'mode' },
-                                        { label: 'code_category', value: 'code_category' }
-                                    ],
-                                    alarm: [
-                                        { label: 'alarm_id', value: 'alarm_id' },
-                                        { label: 'alarm_code', value: 'alarm_code' },
-                                        { label: 'sub_alarm_code', value: 'sub_alarm_code' },
-                                        { label: 'severity', value: 'severity' },
-                                        { label: 'message', value: 'message' },
-                                        { label: 'alarm_status', value: 'alarm_status' },
-                                        { label: 'value', value: 'value' },
-                                        { label: 'threshold', value: 'threshold' }
-                                    ],
-                                    event: [
-                                        { label: 'event_id', value: 'event_id' },
-                                        { label: 'event_code', value: 'event_code' },
-                                        { label: 'sub_event_code', value: 'sub_event_code' },
-                                        { label: 'result', value: 'result' }
-                                    ],
-                                    measurement: [
-                                        { label: 'value', value: 'value' },
-                                        { label: 'spec_upper', value: 'spec_upper' },
-                                        { label: 'spec_lower', value: 'spec_lower' },
-                                        { label: 'target_value', value: 'target_value' },
-                                        { label: 'result', value: 'result' },
-                                        { label: 'lot_id', value: 'lot_id' },
-                                        { label: 'sample_id', value: 'sample_id' },
-                                        { label: 'sample_position', value: 'sample_position' },
-                                        { label: 'inspector', value: 'inspector' }
-                                    ]
-                                };
-
-                                return (
-                                    <Form.Item
-                                        label={isTelemetry ? "資料點欄位 (Data Point)" : "目標欄位 (Target Column)"}
-                                        name="data_point"
-                                        style={{ flex: 1 }}
-                                        tooltip="將對應到資料表中的特定欄位或 JSON key"
-                                    >
-                                        {isTelemetry ? (
-                                            <Input placeholder="選填，例如：temperature" />
-                                        ) : (
-                                            <Select
-                                                placeholder="請選擇對應欄位"
-                                                options={categoryColumns[category] || []}
-                                                allowClear
-                                            />
-                                        )}
-                                    </Form.Item>
-                                );
-                            }}
-                        </Form.Item>
-                    </div>
-
-                    <div style={{ display: 'flex', gap: 16 }}>
-                        <Form.Item label="型別 (Data Type)" name="data_type" style={{ flex: 1 }}>
-                            <Select>
-                                <Select.Option value="float">浮點數 (Float)</Select.Option>
-                                <Select.Option value="integer">整數 (Integer)</Select.Option>
-                                <Select.Option value="string">字串 (String)</Select.Option>
-                                <Select.Option value="boolean">布林值 (Boolean)</Select.Option>
-                            </Select>
-                        </Form.Item>
-
-                        <Form.Item label="單位 (Unit)" name="unit" style={{ flex: 1 }}>
-                            <Input placeholder="例如：°C, %, mm" />
-                        </Form.Item>
-                    </div>
-
-                    <Form.Item label="備註描述" name="description">
-                        <Input.TextArea rows={2} />
-                    </Form.Item>
-                </Form>
-            </Modal>
-
-            {/* History Drawer */}
-            <Drawer
-                title={
-                    <div>
-                        <LineChartOutlined style={{ marginRight: 8, color: 'var(--color-primary)' }} />
-                        {activeTag?.display_name} - 歷史趨勢
-                    </div>
-                }
-                placement="right"
-                width={600}
-                onClose={() => setHistoryDrawerOpen(false)}
-                open={historyDrawerOpen}
-            >
-                <div style={{ marginBottom: 16 }}>
-                    <Text type="secondary">Tag ID: {activeTag?.tag_id} | Data Point: {activeTag?.data_point || 'N/A'}</Text>
-                </div>
-
-                <Spin spinning={isTagLoading}>
                     <Table
                         columns={historyColumns}
                         dataSource={currentTagValues}
                         rowKey="time"
-                        pagination={{ pageSize: 20 }}
+                        pagination={{ pageSize: 10 }}
                         size="small"
                     />
-                </Spin>
-            </Drawer>
-        </div>
+                </Space>
+            );
+        }
+
+        return (
+            <Table
+                columns={historyColumns}
+                dataSource={currentTagValues}
+                rowKey="time"
+                pagination={{ pageSize: 20 }}
+                size="small"
+            />
+        );
+    };
+
+    return (
+        <ConfigProvider
+            theme={{
+                token: { fontSize: 12 },
+                components: { Table: { fontSize: 12 }, Tag: { fontSize: 10 } }
+            }}
+        >
+            <div className="namespace-editor">
+                {/* ── Left: Tree Panel ── */}
+                <div className="namespace-tree-panel">
+                    <div className="namespace-tree-header">
+                        <h3><ApartmentOutlined /> Namespace 範圍</h3>
+                    </div>
+                    <div className="namespace-tree-body">
+                        <Spin spinning={isTreeLoading}>
+                            {antTreeData.length > 0 ? (
+                                <Tree
+                                    treeData={antTreeData}
+                                    showIcon
+                                    defaultExpandAll
+                                    onSelect={handleSelect}
+                                />
+                            ) : (
+                                <Empty description="尚無節點資料" style={{ marginTop: 80 }} />
+                            )}
+                        </Spin>
+                    </div>
+                </div>
+
+                {/* ── Right: Detail Panel (Tag List) ── */}
+                <div className="namespace-detail-panel" style={{ padding: 24, overflow: 'auto' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+                        <div>
+                            <Title level={2} style={{ margin: 0 }}>
+                                <DatabaseOutlined style={{ marginRight: 12, color: 'var(--color-primary)' }} />
+                                Tag 總覽
+                            </Title>
+                            <Paragraph type="secondary" style={{ marginTop: 8 }}>
+                                {selectedPath ? `目前檢視範圍：${selectedPath}` : '請從左側選擇 Namespace 節點以檢視關聯的 Tags'}
+                            </Paragraph>
+                        </div>
+                        <Space size="large">
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <Text type="secondary">包括子節點</Text>
+                                <Switch checked={recursive} onChange={setRecursive} />
+                            </div>
+                            {selectedPath && (
+                                <Button type="primary" icon={<PlusOutlined />} onClick={handleCreateOpen}>
+                                    註冊新 Tag
+                                </Button>
+                            )}
+                        </Space>
+                    </div>
+
+                    <Card bodyStyle={{ padding: 0 }} bordered={false}>
+                        <Table
+                            columns={columns}
+                            dataSource={tags}
+                            rowKey="tag_id"
+                            loading={isTagLoading}
+                            pagination={{ pageSize: 15 }}
+                            locale={{ emptyText: selectedPath ? '此節點下無 Tag' : '請先選擇節點' }}
+                        />
+                    </Card>
+                </div>
+
+                {/* Create / Edit Tag Modal */}
+                <Modal
+                    title={editingTag ? "編輯 Tag 資料點" : "註冊新的 Tag 資料點"}
+                    open={createModalOpen}
+                    onOk={handleFormSubmit}
+                    onCancel={() => {
+                        setCreateModalOpen(false);
+                        setEditingTag(null);
+                    }}
+                    okText={editingTag ? "更新" : "建立"}
+                    cancelText="取消"
+                >
+                    <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
+                        <Form.Item label="Asset Path (綁定節點)" name="asset_path">
+                            <Input disabled />
+                        </Form.Item>
+
+                        <Form.Item
+                            label="顯示名稱 (Display Name)"
+                            name="display_name"
+                            rules={[{ required: true, message: '必填' }]}
+                        >
+                            <Input placeholder="例如：設備溫度" />
+                        </Form.Item>
+
+                        <div style={{ display: 'flex', gap: 16 }}>
+                            <Form.Item
+                                label="分類 (Category)"
+                                name="category"
+                                style={{ flex: 1 }}
+                                rules={[{ required: true }]}
+                            >
+                                <Select>
+                                    <Select.Option value="telemetry">遙測數值 (Telemetry)</Select.Option>
+                                    <Select.Option value="status">設備狀態 (Status)</Select.Option>
+                                    <Select.Option value="alarm">警報 (Alarm)</Select.Option>
+                                    <Select.Option value="event">事件 (Event)</Select.Option>
+                                    <Select.Option value="measurement">量測品管 (Measurement)</Select.Option>
+                                </Select>
+                            </Form.Item>
+
+                            <Form.Item noStyle dependencies={['category']}>
+                                {({ getFieldValue }) => {
+                                    const category = getFieldValue('category');
+                                    const isTelemetry = !category || category === 'telemetry';
+
+                                    const categoryColumns: Record<string, { label: string, value: string }[]> = {
+                                        status: [
+                                            { label: 'state_code', value: 'state_code' },
+                                            { label: 'sub_state_code', value: 'sub_state_code' },
+                                            { label: 'mode', value: 'mode' },
+                                            { label: 'code_category', value: 'code_category' }
+                                        ],
+                                        alarm: [
+                                            { label: 'alarm_id', value: 'alarm_id' },
+                                            { label: 'alarm_code', value: 'alarm_code' },
+                                            { label: 'sub_alarm_code', value: 'sub_alarm_code' },
+                                            { label: 'severity', value: 'severity' },
+                                            { label: 'message', value: 'message' },
+                                            { label: 'alarm_status', value: 'alarm_status' },
+                                            { label: 'value', value: 'value' },
+                                            { label: 'threshold', value: 'threshold' }
+                                        ],
+                                        event: [
+                                            { label: 'event_id', value: 'event_id' },
+                                            { label: 'event_code', value: 'event_code' },
+                                            { label: 'sub_event_code', value: 'sub_event_code' },
+                                            { label: 'result', value: 'result' }
+                                        ],
+                                        measurement: [
+                                            { label: 'value', value: 'value' },
+                                            { label: 'spec_upper', value: 'spec_upper' },
+                                            { label: 'spec_lower', value: 'spec_lower' },
+                                            { label: 'target_value', value: 'target_value' },
+                                            { label: 'result', value: 'result' },
+                                            { label: 'lot_id', value: 'lot_id' },
+                                            { label: 'sample_id', value: 'sample_id' },
+                                            { label: 'sample_position', value: 'sample_position' },
+                                            { label: 'inspector', value: 'inspector' }
+                                        ]
+                                    };
+
+                                    return (
+                                        <Form.Item
+                                            label={isTelemetry ? "資料點欄位 (Data Point)" : "目標欄位 (Target Column)"}
+                                            name="data_point"
+                                            style={{ flex: 1 }}
+                                            tooltip="將對應到資料表中的特定欄位或 JSON key"
+                                        >
+                                            {isTelemetry ? (
+                                                <Input placeholder="選填，例如：temperature" />
+                                            ) : (
+                                                <Select
+                                                    placeholder="請選擇對應欄位"
+                                                    options={categoryColumns[category] || []}
+                                                    allowClear
+                                                />
+                                            )}
+                                        </Form.Item>
+                                    );
+                                }}
+                            </Form.Item>
+                        </div>
+
+                        <div style={{ display: 'flex', gap: 16 }}>
+                            <Form.Item label="型別 (Data Type)" name="data_type" style={{ flex: 1 }}>
+                                <Select>
+                                    <Select.Option value="float">浮點數 (Float)</Select.Option>
+                                    <Select.Option value="integer">整數 (Integer)</Select.Option>
+                                    <Select.Option value="string">字串 (String)</Select.Option>
+                                    <Select.Option value="boolean">布林值 (Boolean)</Select.Option>
+                                </Select>
+                            </Form.Item>
+
+                            <Form.Item label="單位 (Unit)" name="unit" style={{ flex: 1 }}>
+                                <Input placeholder="例如：°C, %, mm" />
+                            </Form.Item>
+                        </div>
+
+                        <Form.Item label="備註描述" name="description">
+                            <Input.TextArea rows={2} />
+                        </Form.Item>
+                    </Form>
+                </Modal>
+
+                {/* History Drawer */}
+                <Drawer
+                    title={
+                        <div>
+                            <LineChartOutlined style={{ marginRight: 8, color: 'var(--color-primary)' }} />
+                            {activeTag?.display_name} - 歷史趨勢
+                        </div>
+                    }
+                    placement="right"
+                    width={800}
+                    onClose={() => setHistoryDrawerOpen(false)}
+                    open={historyDrawerOpen}
+                >
+                    <div style={{ marginBottom: 16 }}>
+                        <Text type="secondary">
+                            Tag ID: {activeTag?.tag_id} | 
+                            Category: <AntTag color="blue" style={{ fontSize: 10, marginLeft: 4 }}>{activeTag?.category?.toUpperCase()}</AntTag> | 
+                            Data Point: {activeTag?.data_point || 'N/A'}
+                        </Text>
+                    </div>
+
+                    <Spin spinning={isTagLoading}>
+                        {renderHistoryContent()}
+                    </Spin>
+                </Drawer>
+            </div>
+        </ConfigProvider>
     );
 }

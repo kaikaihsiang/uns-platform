@@ -151,6 +151,16 @@ async def get_tag_history(db: AsyncSession, tag_id: int) -> list[TagChangeLog]:
 # Tag Value Queries
 # ═══════════════════════════════════════════════════════════════
 
+async def _get_model_by_category(category: str):
+    """Internal helper to resolve TS model by category string."""
+    from app.models import TsAlarms, TsEvents, TsMeasurements, TsMetrics, TsStatus
+    cat = category.lower()
+    if cat == "status": return TsStatus
+    if cat == "alarm": return TsAlarms
+    if cat == "event": return TsEvents
+    if cat == "measurement": return TsMeasurements
+    if cat == "metrics": return TsMetrics
+    return TsTelemetry
 
 async def get_tag_values(
     db: AsyncSession,
@@ -158,27 +168,37 @@ async def get_tag_values(
     start: datetime | None = None,
     end: datetime | None = None,
     limit: int = 1000,
-) -> list[TsTelemetry]:
-    """查詢 Tag 的歷史時序資料（by tag_id，跨 migration）。"""
-    stmt = select(TsTelemetry).where(TsTelemetry.tag_id == tag_id)
+) -> list:
+    """查詢 Tag 的歷史時序資料（依 category 自動分流，跨 migration）。"""
+    tag = await db.get(Tag, tag_id)
+    if not tag:
+        return []
+        
+    model = await _get_model_by_category(tag.category)
+    stmt = select(model).where(model.tag_id == tag_id)
 
     if start:
-        stmt = stmt.where(TsTelemetry.time >= start)
+        stmt = stmt.where(model.time >= start)
     if end:
-        stmt = stmt.where(TsTelemetry.time <= end)
+        stmt = stmt.where(model.time <= end)
 
-    stmt = stmt.order_by(desc(TsTelemetry.time)).limit(limit)
+    stmt = stmt.order_by(desc(model.time)).limit(limit)
 
     result = await db.execute(stmt)
     return list(result.scalars().all())
 
 
-async def get_tag_latest(db: AsyncSession, tag_id: int) -> TsTelemetry | None:
-    """查詢 Tag 的最新一筆資料。"""
+async def get_tag_latest(db: AsyncSession, tag_id: int) -> any:
+    """查詢 Tag 的最新一筆資料（依 category 分流）。"""
+    tag = await db.get(Tag, tag_id)
+    if not tag:
+        return None
+        
+    model = await _get_model_by_category(tag.category)
     result = await db.execute(
-        select(TsTelemetry)
-        .where(TsTelemetry.tag_id == tag_id)
-        .order_by(desc(TsTelemetry.time))
+        select(model)
+        .where(model.tag_id == tag_id)
+        .order_by(desc(model.time))
         .limit(1)
     )
     return result.scalars().first()
@@ -190,10 +210,9 @@ async def get_values_by_topic(
     start: datetime | None = None,
     end: datetime | None = None,
     limit: int = 1000,
-) -> list[TsTelemetry]:
+) -> list:
     """
-    用 MQTT topic 查詢歷史資料。
-    先找 tag_source_mapping 取得 tag_id，再查 ts_telemetry。
+    用 MQTT topic 查詢歷史資料（依 category 分流）。
     注意：只查該 mapping 期間的資料。
     """
     # 找到 mapping
@@ -204,17 +223,22 @@ async def get_values_by_topic(
     if not mapping:
         return []
 
-    stmt = select(TsTelemetry).where(TsTelemetry.tag_id == mapping.tag_id)
+    tag = await db.get(Tag, mapping.tag_id)
+    if not tag:
+        return []
+
+    model = await _get_model_by_category(tag.category)
+    stmt = select(model).where(model.tag_id == mapping.tag_id)
 
     if start:
-        stmt = stmt.where(TsTelemetry.time >= start)
+        stmt = stmt.where(model.time >= start)
     if end:
-        stmt = stmt.where(TsTelemetry.time <= end)
+        stmt = stmt.where(model.time <= end)
 
     # 限制到 mapping 的有效期間
-    stmt = stmt.where(TsTelemetry.time >= mapping.mapped_at)
+    stmt = stmt.where(model.time >= mapping.mapped_at)
 
-    stmt = stmt.order_by(desc(TsTelemetry.time)).limit(limit)
+    stmt = stmt.order_by(desc(model.time)).limit(limit)
 
     result = await db.execute(stmt)
     return list(result.scalars().all())

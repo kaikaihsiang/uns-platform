@@ -121,18 +121,13 @@ async def get_tag_values(
     limit: int = Query(1000, le=10000),
     db: AsyncSession = Depends(get_db),
 ):
-    """查詢 Tag 的歷史時序資料（by tag_id，跨 migration 連續）。"""
+    """查詢 Tag 的歷史時序資料（依 category 自動分流，跨 migration 連續）。"""
     tag = await tag_service.get_tag(db, tag_id)
     if not tag:
         raise HTTPException(status_code=404, detail=f"Tag {tag_id} not found")
 
     rows = await tag_service.get_tag_values(db, tag_id, start=start, end=end, limit=limit)
-    data = [
-        TagValueOut(
-            time=r.time, value=r.value, value_text=r.value_text, quality=r.quality,
-        )
-        for r in rows
-    ]
+    data = [TagValueOut.model_validate(r) for r in rows]
     return TagValuesResponse(tag_id=tag_id, tag=TagOut.model_validate(tag), data=data)
 
 
@@ -144,11 +139,7 @@ async def get_tag_latest(tag_id: int, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail=f"Tag {tag_id} not found")
 
     row = await tag_service.get_tag_latest(db, tag_id)
-    latest = None
-    if row:
-        latest = TagValueOut(
-            time=row.time, value=row.value, value_text=row.value_text, quality=row.quality,
-        )
+    latest = TagValueOut.model_validate(row) if row else None
     return TagLatestResponse(tag_id=tag_id, tag=TagOut.model_validate(tag), latest=latest)
 
 
@@ -175,10 +166,7 @@ async def get_values_by_topic(
 
     tag_id = rows[0].tag_id
     tag = await tag_service.get_tag(db, tag_id)
-    data = [
-        TagValueOut(time=r.time, value=r.value, value_text=r.value_text, quality=r.quality)
-        for r in rows
-    ]
+    data = [TagValueOut.model_validate(r) for r in rows]
     return TagValuesResponse(
         tag_id=tag_id,
         tag=TagOut.model_validate(tag) if tag else None,

@@ -1,10 +1,11 @@
 import logging
 import time
-from typing import Dict, List, Optional
+from typing import Dict
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Tag, TagSourceMapping, NamespaceNode, UnsPayloadSchema
+from app.models import NamespaceNode, Tag, TagSourceMapping, UnsPayloadSchema
 
 logger = logging.getLogger("uns.tag_metadata_cache")
 

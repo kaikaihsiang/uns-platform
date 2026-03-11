@@ -111,7 +111,16 @@ class ProductionService:
         Smart mapping: Vector unit maps for Metrics, Scalar units for others.
         """
         from sqlalchemy import or_
-        from app.models import TsTelemetry, TsStatus, TsAlarms, TsEvents, TsMeasurements, TsMetrics, ProductionRun
+
+        from app.models import (
+            ProductionRun,
+            TsAlarms,
+            TsEvents,
+            TsMeasurements,
+            TsMetrics,
+            TsStatus,
+            TsTelemetry,
+        )
         from app.services.tag_metadata_cache import TagMetadataCache
         
         # 0. Fetch the run to get lot_id

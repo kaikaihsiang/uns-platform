@@ -1108,6 +1108,42 @@ EMQX v5 REST API 使用 Bearer Token 認證：
 - Backend 每 5 秒輪詢 EMQX REST API，推送最新統計 JSON
 - 前端關閉連線時，Backend 停止輪詢
 
+### 8.7 全方位分類歷史查詢與視覺化 (Comprehensive Categorical History)
+
+為了支援工業數據的多維度分析，平台實作了基於資料類別（Category）的自動化查詢與視覺化機制。
+
+#### 8.7.1 後端查詢分流邏輯 (Categorical Routing)
+
+`GET /api/v1/tags/{tag_id}/values` 端點不再侷限於遙測數據，而是根據 Tag 的 `category` 屬性自動導向對應的時序表：
+- **分流映射**：
+    - `telemetry` / `measurement` → `ts_telemetry` / `ts_measurements`
+    - `status` → `ts_status`
+    - `alarm` → `ts_alarms`
+    - `event` → `ts_events`
+    - `metrics` → `ts_metrics`
+- **排序原則**：預設採用 **降序 (DESC)**。
+    - **理由**：確保在 `limit` 限制下，使用者優先取得的是「最近發生的歷史」，而非系統上線初期的過時數據。
+
+#### 8.7.2 前端視覺化模式 (Categorical Visualization)
+
+前端根據回傳的 `TagValueOut` 結構與類別，自動切換最佳呈現方式：
+
+| 數據類別 | 視覺化組件 | 關鍵呈現欄位 | 排序邏輯 |
+| :--- | :--- | :--- | :--- |
+| **Telemetry** | `LineChart` | `value`, `run_id`, `lot_id` | 圖表升序 (ASC) / 列表降序 (DESC) |
+| **Measurement**| `ScatterChart` | `value`, `target_value`, `spec_upper/lower`, `result`, `sample_id`, `step_id` | 圖表升序 (ASC) / 列表降序 (DESC) |
+| **Status** | 詳情表格 | `state_code`, `sub_state_code`, `mode`, `details` | 列表降序 (DESC) |
+| **Alarm** | 詳情表格 | `alarm_id`, `alarm_code`, `severity`, `message`, `alarm_status`, `value/threshold` | 列表降序 (DESC) |
+| **Event** | 詳情表格 | `event_id`, `event_code`, `sub_event_code`, `result`, `details` | 列表降序 (DESC) |
+
+#### 8.7.3 表格操作規格
+
+所有歷史數據表格均遵循以下規範：
+- **多欄位排序 (Multi-column Sorter)**：支援多欄位排序與升降序切換。
+- **預設排序**：預設以「時間」欄位進行 **降序 (DESC)** 排列（最新優先）。
+- **資訊密度優化**：全局字級 **12px**，JSON 詳情 **10px**。
+- **生產脈絡連結**：所有表格預設顯示 `Lot ID` 與 `Run ID`，確保資料與製程活動高度關聯。
+
 ---
 
 ## 9. ACL 與安全模型

@@ -240,9 +240,47 @@ class TagDetailOut(BaseModel):
 
 class TagValueOut(BaseModel):
     time: datetime
+    quality: str | None = "good"
+    
+    # Telemetry / Measurement
     value: float | None = None
     value_text: str | None = None
-    quality: str | None = None
+    value_json: dict | list | None = None
+    
+    # Status
+    state_code: str | None = None
+    sub_state_code: str | None = None
+    mode: str | None = None
+    
+    # Alarm
+    alarm_id: str | None = None
+    alarm_code: str | None = None
+    severity: str | None = None
+    message: str | None = None
+    alarm_status: str | None = None
+    threshold: float | None = None
+    
+    # Event
+    event_id: str | None = None
+    event_code: str | None = None
+    sub_event_code: str | None = None
+    result: str | None = None
+    
+    # Metrics
+    metric_category: str | None = None
+    metric_code: str | None = None
+    period: str | None = None
+    values: dict | None = None
+    
+    # Common
+    code_category: str | None = None
+    run_id: int | None = None
+    lot_id: str | None = None
+    step_id: str | None = None
+    sample_id: str | None = None
+    details: dict | None = None
+
+    model_config = {"from_attributes": True}
 
 
 class TagValuesResponse(BaseModel):

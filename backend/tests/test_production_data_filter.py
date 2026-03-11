@@ -1,8 +1,10 @@
+from datetime import datetime, timezone
+
 import pytest
+from app.models import ProductionRun, Tag, TsAlarms, TsEvents, TsMeasurements
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.models import ProductionRun, TsEvents, TsAlarms, TsMeasurements, TsStatus, TsMetrics, Tag
-from datetime import datetime, timezone
+
 
 @pytest.mark.asyncio
 async def test_get_run_data_filter_logic(client: AsyncClient, db_session: AsyncSession):
