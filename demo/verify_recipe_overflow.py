@@ -1,14 +1,13 @@
-import sys
 import os
+import sys
 from datetime import datetime, timezone
 
 # 加入專案路徑以引用模組
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'data-engine')))
 
-from src.pipeline import Pipeline
-from src.schema_matcher import SchemaMatch, FieldDef
 from src.field_extractor import FieldExtractor
-from src.db_writer import EventRecord
+from src.pipeline import Pipeline
+from src.schema_matcher import FieldDef, SchemaMatch
 
 # 模擬 Mock 物件
 class MockSchemaMatcher:

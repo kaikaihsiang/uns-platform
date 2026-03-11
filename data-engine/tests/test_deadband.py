@@ -15,7 +15,7 @@ class TestDeadbandFilter:
 
     def test_null_deadband_always_writes(self):
         """deadband=None → 每筆都寫。"""
-        for i in range(5):
+        for _i in range(5):
             assert self.db.should_write(tag_id=1, new_value=25.0, deadband=None)
 
     # ── 首筆一定寫 ──

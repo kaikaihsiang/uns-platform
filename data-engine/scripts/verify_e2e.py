@@ -69,7 +69,7 @@ def verify():
     alarm_topic = "Test/E2E/AlarmNode"
     
     logger.info("=== Starting E2E Verification ===")
-    setup_test_schema_and_node()
+    # setup_test_schema_and_node()  # This function is not defined
     setup_multi_category_test()
     
     # 清空測試用的舊資料
