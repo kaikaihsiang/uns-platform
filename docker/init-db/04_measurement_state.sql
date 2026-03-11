@@ -66,8 +66,8 @@ INSERT INTO master_data_codes (code_category, code_value, sub_code_value, label,
     ('metric_definition', 'OEE', '', 'Overall Equipment Effectiveness', '{"unit": "%"}', '設備綜合效率'),
     ('production_lifecycle_code', 'LOT_START', '', 'Lot Start', '{"lifecycle_trigger": "start"}', '生產批次開始 (Metadata Trigger)'),
     ('production_lifecycle_code', 'LOT_END', '', 'Lot End', '{"lifecycle_trigger": "end"}', '生產批次結束 (Metadata Trigger)')
-ON CONFLICT (category, code_value, sub_code_value) DO NOTHING;
+ON CONFLICT (code_category, code_value, sub_code_value) DO NOTHING;
 
 -- ─── ts_status Index on state ───────────────────────────────
 
-CREATE INDEX IF NOT EXISTS idx_status_state ON ts_status(tag_id, state, time);
+CREATE INDEX IF NOT EXISTS idx_status_state ON ts_status(tag_id, state_code, time);

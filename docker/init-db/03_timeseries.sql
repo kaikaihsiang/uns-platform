@@ -64,7 +64,9 @@ CREATE TABLE IF NOT EXISTS ts_telemetry (
     value       DOUBLE PRECISION,
     value_text  TEXT,
     value_json  JSONB,
-    quality     TEXT DEFAULT 'good'
+    quality     TEXT DEFAULT 'good',
+    run_id      INTEGER,
+    lot_id      TEXT
 );
 
 SELECT create_hypertable('ts_telemetry', 'time', if_not_exists => TRUE);
@@ -83,18 +85,20 @@ COMMENT ON COLUMN ts_telemetry.quality IS '數據品質標誌 (good/bad/uncertai
 CREATE TABLE IF NOT EXISTS ts_status (
     time            TIMESTAMPTZ NOT NULL,
     tag_id          INTEGER NOT NULL REFERENCES tags(tag_id),
-    state           TEXT NOT NULL,
-    sub_state       TEXT,
+    state_code      TEXT NOT NULL,
+    sub_state_code  TEXT,
     code_category   TEXT,
     mode            TEXT,
+    run_id          INTEGER,
+    lot_id          TEXT,
     details         JSONB
 );
 
 SELECT create_hypertable('ts_status', 'time', if_not_exists => TRUE);
 CREATE INDEX IF NOT EXISTS idx_ts_status_tag ON ts_status(tag_id, time DESC);
 
-COMMENT ON COLUMN ts_status.state IS '設備主狀態碼 (對應 master_data_codes.code_value)';
-COMMENT ON COLUMN ts_status.sub_state IS '設備子狀態碼 (對應 master_data_codes.sub_code_value)';
+COMMENT ON COLUMN ts_status.state_code IS '設備主狀態碼 (對應 master_data_codes.code_value)';
+COMMENT ON COLUMN ts_status.sub_state_code IS '設備子狀態碼 (對應 master_data_codes.sub_code_value)';
 COMMENT ON COLUMN ts_status.code_category IS '狀態碼分類 (對應 master_data_codes.code_category)';
 COMMENT ON COLUMN ts_status.mode IS '運行模式 (Auto/Manual/Semi-Auto)';
 COMMENT ON COLUMN ts_status.details IS '額外狀態補充資訊';
@@ -106,14 +110,16 @@ CREATE TABLE IF NOT EXISTS ts_alarms (
     time            TIMESTAMPTZ NOT NULL,
     tag_id          INTEGER NOT NULL REFERENCES tags(tag_id),
     alarm_id        TEXT NOT NULL,
-    code            TEXT NOT NULL,
-    sub_code        TEXT,
+    alarm_code      TEXT NOT NULL,
+    sub_alarm_code  TEXT,
     code_category   TEXT,
     severity        TEXT NOT NULL,
     message         TEXT,
-    state           TEXT NOT NULL,
+    alarm_status    TEXT NOT NULL,
     value           DOUBLE PRECISION,
     threshold       DOUBLE PRECISION,
+    run_id          INTEGER,
+    lot_id          TEXT,
     details         JSONB
 );
 
@@ -122,10 +128,10 @@ CREATE INDEX IF NOT EXISTS idx_ts_alarms_tag ON ts_alarms(tag_id, time DESC);
 CREATE INDEX IF NOT EXISTS idx_ts_alarms_severity ON ts_alarms(severity, time DESC);
 
 COMMENT ON COLUMN ts_alarms.alarm_id IS '告警執行個體唯一編號';
-COMMENT ON COLUMN ts_alarms.code IS '主告警代碼';
-COMMENT ON COLUMN ts_alarms.sub_code IS '解析用子告警代碼';
+COMMENT ON COLUMN ts_alarms.alarm_code IS '主告警代碼';
+COMMENT ON COLUMN ts_alarms.sub_alarm_code IS '解析用子告警代碼';
 COMMENT ON COLUMN ts_alarms.severity IS '嚴重程度 (critical/warning/info)';
-COMMENT ON COLUMN ts_alarms.state IS '當前告警狀態 (active/cleared/acknowledged)';
+COMMENT ON COLUMN ts_alarms.alarm_status IS '當前告警狀態 (active/cleared/acknowledged)';
 COMMENT ON COLUMN ts_alarms.value IS '觸發告警當下的觀測值 (Optional)';
 COMMENT ON COLUMN ts_alarms.threshold IS '觸發告警之預設閾值 (Optional)';
 
@@ -136,18 +142,20 @@ CREATE TABLE IF NOT EXISTS ts_events (
     time            TIMESTAMPTZ NOT NULL,
     tag_id          INTEGER NOT NULL REFERENCES tags(tag_id),
     event_id        TEXT NOT NULL,
-    event           TEXT NOT NULL,
-    sub_event       TEXT,
+    event_code      TEXT NOT NULL,
+    sub_event_code  TEXT,
     code_category   TEXT,
     result          TEXT,
+    run_id          INTEGER,
+    lot_id          TEXT,
     details         JSONB
 );
 
 SELECT create_hypertable('ts_events', 'time', if_not_exists => TRUE);
 CREATE INDEX IF NOT EXISTS idx_ts_events_tag ON ts_events(tag_id, time DESC);
 
-COMMENT ON COLUMN ts_events.event IS '主事件名稱/代碼';
-COMMENT ON COLUMN ts_events.sub_event IS '子事件描述或代碼';
+COMMENT ON COLUMN ts_events.event_code IS '主事件名稱/代碼';
+COMMENT ON COLUMN ts_events.sub_event_code IS '子事件描述或代碼';
 COMMENT ON COLUMN ts_events.result IS '事件執行結果 (Success/Failed/Aborted)';
 
 
@@ -161,6 +169,7 @@ CREATE TABLE IF NOT EXISTS ts_metrics (
     sub_metric_code TEXT,
     period          TEXT,
     values          JSONB NOT NULL,
+    run_id          INTEGER,
     context         JSONB,
     details         JSONB
 );
@@ -187,7 +196,8 @@ CREATE TABLE IF NOT EXISTS ts_raw_payloads (
     mqtt_topic    TEXT NOT NULL,
     payload       JSONB NOT NULL,
     payload_size  INTEGER,
-    schema_id     INTEGER
+    schema_id     INTEGER,
+    run_id        INTEGER
 );
 
 SELECT create_hypertable('ts_raw_payloads', 'time', if_not_exists => TRUE);
