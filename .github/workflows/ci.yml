@@ -32,7 +32,7 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-cmd "pg_isready -U uns_admin -d uns_test"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
@@ -50,7 +50,7 @@ jobs:
           PGPASSWORD: uns_dev_password
         run: |
           sudo apt-get update && sudo apt-get install -y postgresql-client
-          until pg_isready -h localhost -p 5432 -U postgres -d postgres; do
+          until pg_isready -h localhost -p 5432 -U uns_admin -d uns_test; do
             echo "Waiting for database..."
             sleep 2
           done
@@ -79,7 +79,7 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-cmd "pg_isready -U uns_admin -d uns_test"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
@@ -97,7 +97,7 @@ jobs:
           PGPASSWORD: uns_dev_password
         run: |
           sudo apt-get update && sudo apt-get install -y postgresql-client
-          until pg_isready -h localhost -p 5432 -U postgres -d postgres; do
+          until pg_isready -h localhost -p 5432 -U uns_admin -d uns_test; do
             echo "Waiting for database..."
             sleep 2
           done
