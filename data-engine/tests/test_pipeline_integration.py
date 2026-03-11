@@ -1,8 +1,7 @@
-import pytest
 import json
+
 from src.pipeline import Pipeline
-from src.schema_matcher import SchemaMatcher
-from src.db_writer import DBWriter
+
 
 def test_pipeline_telemetry_flow(real_db_pool, sample_payloads):
     """

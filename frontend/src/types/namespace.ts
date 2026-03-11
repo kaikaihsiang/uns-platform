@@ -62,7 +62,7 @@ export interface SchemaField {
     target_column?: string | null;
 }
 
-export interface SchemaTypeOut {
+export interface PayloadSchemaOut {
     schema_id: number;
     schema_name: string;
     decoder: string;
@@ -81,7 +81,7 @@ export interface SchemaTypeOut {
     updated_at?: string;
 }
 
-export interface SchemaTypeCreate {
+export interface PayloadSchemaCreate {
     schema_name: string;
     decoder: string;
     timestamp_field?: string | null;
@@ -93,7 +93,7 @@ export interface SchemaTypeCreate {
     fields: SchemaField[];
 }
 
-export interface SchemaTypeUpdate {
+export interface PayloadSchemaUpdate {
     schema_name?: string;
     decoder?: string;
     timestamp_field?: string | null;

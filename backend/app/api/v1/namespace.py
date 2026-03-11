@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.schemas import NodeCreate, NodeRename, NodeMove, NodePersistence, NodeOut, NodeSchemaUpdate
+from app.schemas import NodeCreate, NodeMove, NodeOut, NodePersistence, NodeRename, NodeSchemaUpdate
 from app.services import namespace_service
 
 router = APIRouter(prefix="/namespace", tags=["Namespace"])

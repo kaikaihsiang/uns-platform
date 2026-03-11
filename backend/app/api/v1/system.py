@@ -99,7 +99,6 @@ async def get_system_info(db: AsyncSession = Depends(get_db)):
     """
     平台資訊 — 各服務連線狀態、版本、uptime。
     """
-    from fastapi import Request
 
     # DB status
     db_info = {"status": "disconnected", "version": "unknown", "connection_pool": {}}

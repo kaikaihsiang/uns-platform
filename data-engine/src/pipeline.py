@@ -9,29 +9,34 @@ UNS Data Engine — Pipeline Orchestrator
                                                 └── Raw Writer (if store_raw=true)
 """
 
-import logging
-import json
-from datetime import datetime, timezone
-from typing import Optional, Dict, Any
-
 import asyncio
+import json
+import logging
+from datetime import datetime, timezone
+from typing import Any, Dict, Optional
+
 import httpx
 
 from .auto_detect import AutoDetector
+from .category_router import CategoryRouter
 from .config import Config
 from .context_cache import ActiveRunCache
-from .deadband import DeadbandFilter
+from .db_pool import DBPool
 from .db_writer import (
-    DBWriter, RawPayloadRecord, TelemetryRecord,
-    StatusRecord, AlarmRecord, EventRecord,
-    MeasurementRecord, MetricsRecord
+    AlarmRecord,
+    DBWriter,
+    EventRecord,
+    MeasurementRecord,
+    MetricsRecord,
+    RawPayloadRecord,
+    StatusRecord,
+    TelemetryRecord,
 )
+from .deadband import DeadbandFilter
 from .decoder import DecodeResult, get_decoder
 from .field_extractor import FieldExtractor
-from .schema_matcher import SchemaMatcher
-from .category_router import CategoryRouter
 from .master_data_cache import MasterDataCache
-from .db_pool import DBPool
+from .schema_matcher import SchemaMatcher
 
 logger = logging.getLogger("uns.pipeline")
 
@@ -278,22 +283,25 @@ class Pipeline:
                 run_id = ctx['run_id'] if ctx else None
                 lot_id = ctx['lot_id'] if ctx else None
 
-            target_kwargs, business_values, technical_details = {}, {}, {}
+            target_kwargs, details = {}, {}
             for ev in extracted_values:
                 val = ev.value if ev.value is not None else (ev.value_text if ev.value_text is not None else ev.value_json)
-                if ev.target_column:
+                
+                # If mapped to a specific column (other than the general 'details' bag)
+                if ev.target_column and ev.target_column != "details":
                     target_kwargs[ev.target_column] = val
-                elif getattr(ev, 'is_schema_defined', True):
-                    business_values[ev.tag_suffix] = val
-                else:
-                    technical_details[ev.tag_suffix] = val
+                
+                # If marked as overflow (either explicitly mapped to 'details', target is None, or unknown field)
+                if ev.overflow:
+                    details[ev.tag_suffix] = val
             
-            if not target_kwargs and not business_values and not technical_details: return
-            details = {**business_values, **technical_details}
+            if not target_kwargs and not details: return
             
             if self._db_writer:
+                # Special handling for metrics: use target_kwargs['values'] if available, otherwise use all overflow details
                 if schema_category == "metrics":
-                    record = self._build_non_telemetry_record(schema_category, receive_time, tag_id, target_kwargs, technical_details, run_id, lot_id, schema, asset_path, business_values)
+                    metrics_vals = target_kwargs.get("values") or details
+                    record = self._build_non_telemetry_record(schema_category, receive_time, tag_id, target_kwargs, details, run_id, lot_id, schema, asset_path, metrics_vals)
                 else:
                     record = self._build_non_telemetry_record(schema_category, receive_time, tag_id, target_kwargs, details, run_id, lot_id, schema, asset_path)
                 if record:
@@ -337,9 +345,9 @@ class Pipeline:
                 event_id = _generate_synthetic_id("EVT", f"{tag_id}-{main_code}-{receive_time.isoformat()}")
             return EventRecord(time=receive_time, tag_id=tag_id, event_id=event_id, event_code=main_code or "EVENT-CODE-UNKNOWN", sub_event_code=final_sub, code_category=final_cat or "equipment_state", result=_safe_str(target_kwargs.get("result")), run_id=run_id, lot_id=_safe_str(target_kwargs.get("lot_id")) if "lot_id" in target_kwargs else lot_id, details=details if details else None)
         elif schema_category == "measurement":
-            return MeasurementRecord(time=receive_time, tag_id=tag_id, value=_safe_float(target_kwargs.get("value"), 0.0), spec_upper=_safe_float(target_kwargs.get("spec_upper")), spec_lower=_safe_float(target_kwargs.get("spec_lower")), target_value=_safe_float(target_kwargs.get("target_value")), result=_safe_str(target_kwargs.get("result")), run_id=run_id, lot_id=_safe_str(target_kwargs.get("lot_id")) if "lot_id" in target_kwargs else lot_id, step_id=_safe_str(target_kwargs.get("step_id")), sample_id=_safe_str(target_kwargs.get("sample_id") or target_kwargs.get("panel_id")), sample_position=_safe_str(target_kwargs.get("sample_position")), inspector=_safe_str(target_kwargs.get("inspector")), context=target_kwargs.get("context"), details=details if details else None)
+            return MeasurementRecord(time=receive_time, tag_id=tag_id, value=_safe_float(target_kwargs.get("value"), 0.0), spec_upper=_safe_float(target_kwargs.get("spec_upper")), spec_lower=_safe_float(target_kwargs.get("spec_lower")), target_value=_safe_float(target_kwargs.get("target_value")), result=_safe_str(target_kwargs.get("result")), run_id=run_id, lot_id=_safe_str(target_kwargs.get("lot_id")) if "lot_id" in target_kwargs else lot_id, step_id=_safe_str(target_kwargs.get("step_id")), sample_id=_safe_str(target_kwargs.get("sample_id") or target_kwargs.get("panel_id")), sample_position=_safe_str(target_kwargs.get("sample_position")), inspector=_safe_str(target_kwargs.get("inspector")), context=None, details=details if details else None)
         elif schema_category == "metrics":
-            return MetricsRecord(time=receive_time, tag_id=tag_id, metric_category=final_cat or "metric_definition", metric_code=main_code or "METRIC-CODE-UNKNOWN", sub_metric_code=final_sub, period=_safe_str(target_kwargs.get("period")), values=target_kwargs.get("values") or metrics_values or {}, context=target_kwargs.get("context"), details=details if details else None)
+            return MetricsRecord(time=receive_time, tag_id=tag_id, metric_category=final_cat or "metric_definition", metric_code=main_code or "METRIC-CODE-UNKNOWN", sub_metric_code=final_sub, period=_safe_str(target_kwargs.get("period")), values=target_kwargs.get("values") or metrics_values or {}, context=None, details=details if details else None)
 
     def _dispatch_mes_event(self, trigger_type: str, target_kwargs: dict, details: dict, asset_path: str):
         logger.info(f"Dispatching Production Lifecycle Trigger: {trigger_type} for path {asset_path}")

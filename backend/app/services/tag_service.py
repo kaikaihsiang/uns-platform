@@ -3,11 +3,10 @@ Tag Service — Tag CRUD, auto mapping, and query
 """
 from datetime import datetime, timezone
 
-from sqlalchemy import select, desc, update
+from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Tag, TagSourceMapping, TagChangeLog, TsTelemetry
-
+from app.models import Tag, TagChangeLog, TagSourceMapping, TsTelemetry
 
 # ═══════════════════════════════════════════════════════════════
 # Tag CRUD

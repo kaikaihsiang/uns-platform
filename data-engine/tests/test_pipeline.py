@@ -3,11 +3,10 @@ Tests for UNS Data Engine — Pipeline (end-to-end mock)
 """
 
 import json
-from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
-from src.deadband import DeadbandFilter
 from src.db_writer import DBWriter
+from src.deadband import DeadbandFilter
 from src.field_extractor import FieldExtractor
 from src.pipeline import Pipeline, TagLookup
 from src.schema_matcher import FieldDef, SchemaMatch, SchemaMatcher
@@ -235,3 +234,103 @@ class TestPipelineStats:
         stats = pipeline.stats
         assert stats["total_processed"] == 2
         assert stats["total_no_schema"] == 1
+
+
+class TestPipelineOverflow:
+    """測試資料溢位至 details/context 的邏輯。"""
+
+    def test_event_overflow_to_details(self):
+        """驗證非 telemetry 資料會自動彙整 overflow 欄位至 details。"""
+        topic = "Ent/Site/Area/Line1/Printer/Event/Recipe"
+        schema = SchemaMatch(
+            node_id=10,
+            full_path=topic,
+            persist_mode="db",
+            retention_days=30,
+            schema_category="event",
+            fields=[
+                FieldDef(name="event_code", path="$.event_code", type="string", target_column="event_code"),
+                FieldDef(name="recipe_id", path="$.recipe_id", type="string", target_column="details"),
+            ],
+        )
+        matcher = _make_matcher(schema)
+        db_writer = MagicMock(spec=DBWriter)
+        
+        pipeline = Pipeline(
+            schema_matcher=matcher,
+            db_writer=db_writer,
+            tag_lookup=TagLookup(),
+            field_extractor=FieldExtractor()
+        )
+
+        # 模擬 Payload：
+        # - event_code: 已定義，target_column='event_code'
+        # - recipe_id: 已定義，target_column='details'
+        # - temp: 未定義 (自動捕捉)
+        payload = json.dumps({
+            "event_code": "LOAD",
+            "recipe_id": "R-101",
+            "data": {
+                "temp": 250.5
+            }
+        }).encode()
+
+        pipeline.process(topic, payload)
+
+        # 驗證 DBWriter.add_event 被呼叫
+        assert db_writer.add_event.call_count == 1
+        record = db_writer.add_event.call_args[0][0]
+        
+        # 強制印出結果供驗證
+        print(f"\n[E2E Verification] Event Code: {record.event_code}")
+        print(f"[E2E Verification] Details Bag: {record.details}")
+        
+        # 1. 實體欄位正確映射
+        assert record.event_code == "LOAD"
+        
+        # 2. 溢位欄位彙整至 details
+        assert isinstance(record.details, dict)
+        assert record.details["recipe_id"] == "R-101"
+        assert record.details["temp"] == 250.5
+        
+        # 3. 確保 details 中沒有重複的 event_code (因為它已經有專屬 column)
+        assert "event_code" not in record.details
+
+
+class TestPipelineProductionContext:
+    """測試 Pipeline 結合生產上下文 (Lot ID) 的邏輯。"""
+
+    def test_telemetry_with_lot_context(self):
+        """驗證 Telemetry 寫入時會自動帶上當前的 Lot ID。"""
+        topic = "Ent/Site/Area/Line1/Printer/Telemetry"
+        matcher = _make_matcher(_telemetry_schema(topic))
+        db_writer = MagicMock(spec=DBWriter)
+        
+        # Mock Context Cache
+        mock_cache = MagicMock()
+        # 當查詢 Printer 路徑時，回傳 Lot-999
+        mock_cache.get_active_run.return_value = {
+            "run_id": 123,
+            "lot_id": "LOT-999"
+        }
+
+        pipeline = Pipeline(
+            schema_matcher=matcher,
+            db_writer=db_writer,
+            tag_lookup=TagLookup()
+        )
+        # 注入 Mock Cache
+        pipeline._context_cache = mock_cache
+
+        payload = json.dumps({"temperature": 25.0}).encode()
+        pipeline.process(topic, payload)
+
+        # 驗證寫入的 Record 包含 Lot ID
+        assert db_writer.add_telemetry.call_count == 1
+        record = db_writer.add_telemetry.call_args[0][0]
+        
+        assert record.lot_id == "LOT-999"
+        assert record.run_id == 123
+        # 驗證快取查詢路徑（應為 asset_path）
+        mock_cache.get_active_run.assert_called_once()
+

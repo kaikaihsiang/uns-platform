@@ -7,17 +7,10 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.v1 import ai, data, namespace, production_runs, system, tags
+from app.api.v1 import schema_types as payload_schemas
 from app.core.config import settings
 from app.core.database import engine
-from app.api.v1 import (
-    namespace, 
-    tags, 
-    data, 
-    schema_types as payload_schemas, 
-    system, 
-    ai,
-    production_runs
-)
 
 
 @asynccontextmanager

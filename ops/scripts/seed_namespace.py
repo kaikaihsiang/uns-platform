@@ -1,5 +1,6 @@
-import requests
 import sys
+
+import requests
 
 API_BASE = "http://localhost:8000/api/v1"
 
@@ -88,7 +89,7 @@ def main():
             {"name": "vib", "path": "$.data.values.vib", "type": "float", "unit": "mm/s", "extract": True, "persist": True, "deadband": 0.01, "array_mode": "single"}
         ]
     )
-    print(f"✓ Schema SMT_Mounter_Telemetry (telemetry) created.")
+    print("✓ Schema SMT_Mounter_Telemetry (telemetry) created.")
 
     # 2. Status Schema (SEMI E10 設備狀態機)
     schema_status = create_schema(
@@ -99,7 +100,7 @@ def main():
             {"name": "mode", "path": "$.data.mode", "type": "string", "unit": "", "extract": True, "persist": True, "deadband": "change_only", "array_mode": "single", "target_column": "mode"}
         ]
     )
-    print(f"✓ Schema SEMI_E10_Equipment_Status (status) created.")
+    print("✓ Schema SEMI_E10_Equipment_Status (status) created.")
 
     # 3. Alarm Schema (警報與異常 - ISA-18.2)
     schema_alarm = create_schema(
@@ -112,7 +113,7 @@ def main():
             {"name": "alarm_id", "path": "$.data.alarm_id", "type": "string", "unit": "", "extract": True, "persist": True, "deadband": None, "array_mode": "single", "target_column": "alarm_id"}
         ]
     )
-    print(f"✓ Schema SMT_Equipment_Alarm (alarm) created.")
+    print("✓ Schema SMT_Equipment_Alarm (alarm) created.")
 
     # 4. Event Schema (生產事件 - 生產追溯)
     schema_event = create_schema(
@@ -124,7 +125,7 @@ def main():
             # {"name": "unit_id", "path": "$.data.unit_id", "type": "string", "unit": "", "extract": True, "persist": True, "deadband": None, "array_mode": "single", "target_column": "sample_id"}
         ]
     )
-    print(f"✓ Schema Production_Event (event) created.")
+    print("✓ Schema Production_Event (event) created.")
 
     # 5. Measurement Schema (AOI 檢測結果)
     schema_measurement = create_schema(
@@ -136,7 +137,7 @@ def main():
             {"name": "offset_x", "path": "$.data.offset_x", "type": "float", "unit": "mm", "extract": True, "persist": True, "deadband": None, "array_mode": "single", "target_column": "value"}
         ]
     )
-    print(f"✓ Schema AOI_Inspection_Measurement (measurement) created.")
+    print("✓ Schema AOI_Inspection_Measurement (measurement) created.")
 
     # 6. Metrics Schema (KPI 統計)
     schema_metrics = create_schema(
@@ -150,7 +151,7 @@ def main():
             {"name": "qual", "path": "$.data.values.qual", "type": "float", "unit": "%", "extract": True, "persist": True, "deadband": None, "array_mode": "single"}
         ]
     )
-    print(f"✓ Schema Equipment_OEE_Metrics (metrics) created.")
+    print("✓ Schema Equipment_OEE_Metrics (metrics) created.")
 
     # 7. Maintenance Schema
     schema_maintenance = create_schema(

@@ -22,12 +22,9 @@ equipment_state_consumer.py — 設備狀態 Consumer 模組
     pip install psycopg2-binary pyyaml
 """
 
-import json
 import logging
 from datetime import datetime
 from typing import Optional
-
-import psycopg2
 
 logger = logging.getLogger("uns_consumer.equipment_state")
 

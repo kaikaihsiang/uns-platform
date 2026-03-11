@@ -1,8 +1,8 @@
 """
 AI Chat API — Gemini + MCP Tools
 """
-from pydantic import BaseModel
 from fastapi import APIRouter
+from pydantic import BaseModel
 
 from app.services import ai_service
 

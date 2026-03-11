@@ -1,9 +1,10 @@
-import paho.mqtt.client as mqtt
-import json
-import time
-import random
 import argparse
+import json
+import random
+import time
 from datetime import datetime, timezone
+
+import paho.mqtt.client as mqtt
 
 # Configuration
 BROKER = "localhost"

@@ -1,11 +1,13 @@
 import pytest
-from httpx import AsyncClient, ASGITransport
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy import text
-
-from app.main import app
-from app.core.database import get_db
 from app.core.config import settings
+from app.core.database import get_db
+from app.main import app
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+from .seed_data import seed_test_data
+
 
 @pytest.fixture(scope="session")
 async def test_engine():
@@ -21,7 +23,7 @@ async def test_engine():
 async def db_session(test_engine):
     """
     Async database session fixture for testing.
-    Resets the database before each test and provides a clean session.
+    Resets the database before each test and provides a clean session with seed data.
     """
     async with test_engine.begin() as conn:
         # Clear all tables using the function provided by db-schema-engineer
@@ -34,6 +36,7 @@ async def db_session(test_engine):
     )
     
     async with SessionLocal() as session:
+        await seed_test_data(session)
         yield session
 
 @pytest.fixture

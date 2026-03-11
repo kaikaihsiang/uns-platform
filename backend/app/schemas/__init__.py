@@ -5,7 +5,6 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field, model_validator
 
-
 # ═══════════════════════════════════════════════════════════════
 # Namespace
 # ═══════════════════════════════════════════════════════════════
@@ -76,7 +75,7 @@ class SchemaField(BaseModel):
     target_column: str | None = None
 
 
-class SchemaTypeCreate(BaseModel):
+class PayloadSchemaCreate(BaseModel):
     schema_name: str
     decoder: str = "json"
     timestamp_field: str | None = None
@@ -88,14 +87,14 @@ class SchemaTypeCreate(BaseModel):
     schema_category: str = Field(default="telemetry", pattern=r"^(telemetry|status|alarm|event|measurement|metrics)$")
 
     @model_validator(mode="after")
-    def validate_target_columns(self) -> "SchemaTypeCreate":
+    def validate_target_columns(self) -> "PayloadSchemaCreate":
         allowed_targets = {
             "telemetry": set(),
-            "status": {"state_code", "sub_state_code", "code_category", "mode"},
-            "alarm": {"alarm_id", "alarm_code", "sub_alarm_code", "code_category", "severity", "message", "alarm_status", "value", "threshold"},
-            "event": {"event_id", "event_code", "sub_event_code", "code_category", "result", "lot_id", "sample_id"},
-            "measurement": {"value", "spec_upper", "spec_lower", "target_value", "result", "lot_id", "sample_id", "sample_position", "inspector"},
-            "metrics": {"metric_category", "metric_code", "sub_metric_code", "period"},
+            "status": {"state_code", "sub_state_code", "code_category", "mode", "details"},
+            "alarm": {"alarm_id", "alarm_code", "sub_alarm_code", "code_category", "severity", "message", "alarm_status", "value", "threshold", "details"},
+            "event": {"event_id", "event_code", "sub_event_code", "code_category", "result", "lot_id", "sample_id", "details"},
+            "measurement": {"value", "spec_upper", "spec_lower", "target_value", "result", "lot_id", "sample_id", "sample_position", "inspector", "details"},
+            "metrics": {"metric_category", "metric_code", "sub_metric_code", "period", "values", "details"},
         }
         category = self.schema_category
         valid_set = allowed_targets.get(category, set())
@@ -110,7 +109,7 @@ class SchemaTypeCreate(BaseModel):
         return self
 
 
-class SchemaTypeUpdate(BaseModel):
+class PayloadSchemaUpdate(BaseModel):
     schema_name: str | None = None
     decoder: str | None = None
     timestamp_field: str | None = None
@@ -122,17 +121,17 @@ class SchemaTypeUpdate(BaseModel):
     schema_category: str | None = Field(default=None, pattern=r"^(telemetry|status|alarm|event|measurement|metrics)$")
 
     @model_validator(mode="after")
-    def validate_target_columns(self) -> "SchemaTypeUpdate":
+    def validate_target_columns(self) -> "PayloadSchemaUpdate":
         if not self.fields or not self.schema_category:
             return self
 
         allowed_targets = {
             "telemetry": set(),
-            "status": {"state_code", "sub_state_code", "code_category", "mode"},
-            "alarm": {"alarm_id", "alarm_code", "sub_alarm_code", "code_category", "severity", "message", "alarm_status", "value", "threshold"},
-            "event": {"event_id", "event_code", "sub_event_code", "code_category", "result", "lot_id", "sample_id"},
-            "measurement": {"value", "spec_upper", "spec_lower", "target_value", "result", "lot_id", "sample_id", "sample_position", "inspector"},
-            "metrics": {"metric_category", "metric_code", "sub_metric_code", "period"},
+            "status": {"state_code", "sub_state_code", "code_category", "mode", "details"},
+            "alarm": {"alarm_id", "alarm_code", "sub_alarm_code", "code_category", "severity", "message", "alarm_status", "value", "threshold", "details"},
+            "event": {"event_id", "event_code", "sub_event_code", "code_category", "result", "lot_id", "sample_id", "details"},
+            "measurement": {"value", "spec_upper", "spec_lower", "target_value", "result", "lot_id", "sample_id", "sample_position", "inspector", "details"},
+            "metrics": {"metric_category", "metric_code", "sub_metric_code", "period", "values", "details"},
         }
         category_str = str(self.schema_category)
         valid_set = allowed_targets.get(category_str, set())
@@ -147,7 +146,7 @@ class SchemaTypeUpdate(BaseModel):
         return self
 
 
-class SchemaTypeOut(BaseModel):
+class PayloadSchemaOut(BaseModel):
     schema_id: int
     schema_name: str
     decoder: str

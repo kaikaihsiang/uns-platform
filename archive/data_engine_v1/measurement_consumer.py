@@ -22,13 +22,10 @@ measurement_consumer.py — Measurement Data Consumer 模組
     pip install psycopg2-binary
 """
 
-import json
 import logging
-import math
 from datetime import datetime
 from typing import Optional
 
-import psycopg2
 from psycopg2.extras import execute_values
 
 logger = logging.getLogger("uns_consumer.measurement")

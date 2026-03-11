@@ -1,17 +1,17 @@
 import { create } from 'zustand';
 import axios from 'axios';
-import type { SchemaTypeOut, SchemaTypeCreate, SchemaTypeUpdate } from '../types/namespace';
+import type { PayloadSchemaOut, PayloadSchemaCreate, PayloadSchemaUpdate } from '../types/namespace';
 
 interface SchemaState {
-    schemas: SchemaTypeOut[];
-    suggestions: SchemaTypeOut[];
+    schemas: PayloadSchemaOut[];
+    suggestions: PayloadSchemaOut[];
     isLoading: boolean;
     fetchSchemas: () => Promise<void>;
     fetchSuggestions: () => Promise<void>;
     approveSuggestion: (schemaId: number, category?: string) => Promise<boolean>;
     deleteSchema: (schemaId: number) => Promise<boolean>;
-    createSchema: (data: SchemaTypeCreate) => Promise<boolean>;
-    updateSchema: (schemaId: number, data: SchemaTypeUpdate) => Promise<boolean>;
+    createSchema: (data: PayloadSchemaCreate) => Promise<boolean>;
+    updateSchema: (schemaId: number, data: PayloadSchemaUpdate) => Promise<boolean>;
 }
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';

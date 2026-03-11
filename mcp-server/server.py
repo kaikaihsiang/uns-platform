@@ -17,7 +17,6 @@ Usage:
 """
 import json
 import logging
-from datetime import datetime
 
 import httpx
 from mcp.server.fastmcp import FastMCP

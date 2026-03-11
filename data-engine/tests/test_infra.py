@@ -1,5 +1,3 @@
-import pytest
-from unittest.mock import MagicMock
 
 def test_mock_db_pool_connection(mock_db_pool):
     """

@@ -27,7 +27,6 @@ oee_tool.py — OEE 分析 CLI 工具
 """
 
 import argparse
-import json
 import os
 import sys
 

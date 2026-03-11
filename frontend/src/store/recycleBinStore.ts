@@ -1,10 +1,10 @@
 import { create } from 'zustand';
 import axios from 'axios';
-import type { NodeOut, SchemaTypeOut, TagOut } from '../types/namespace';
+import type { NodeOut, PayloadSchemaOut, TagOut } from '../types/namespace';
 
 interface RecycleBinState {
     deletedNodes: NodeOut[];
-    deletedSchemas: SchemaTypeOut[];
+    deletedSchemas: PayloadSchemaOut[];
     deletedTags: TagOut[];
     isLoading: boolean;
 

@@ -7,15 +7,12 @@ asyncio 入口：初始化 DB → Schema Matcher → Tag Lookup → Pipeline →
 import asyncio
 import logging
 import signal
-import sys
 from datetime import datetime, timedelta, timezone
-
-import psycopg2
 
 from src.config import Config
 from src.consumer import MQTTConsumer
-from src.pipeline import Pipeline
 from src.db_pool import DBPool
+from src.pipeline import Pipeline
 
 # ── Logging 設定 ──────────────────────────────────────────────
 

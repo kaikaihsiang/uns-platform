@@ -1,6 +1,7 @@
 import pytest
-from sqlalchemy import select
 from app.models import NamespaceNode
+from sqlalchemy import select
+
 
 @pytest.mark.asyncio
 async def test_write_node(db_session):

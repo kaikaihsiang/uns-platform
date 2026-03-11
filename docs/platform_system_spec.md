@@ -12,7 +12,7 @@
 2. [系統架構](#2-系統架構)
 3. [Namespace 資料模型](#3-namespace-資料模型)
 4. [Payload 處理規格](#4-payload-處理規格)
-5. [Schema Type 系統](#5-schema-type-系統)
+5. [Payload Schema 系統](#5-payload-schema-系統)
 6. [資料持久化規格](#6-資料持久化規格)
 7. [Tag 身份管理與 Live Migration](#7-tag-身份管理與-live-migration)
 8. [資料存取介面](#8-資料存取介面)
@@ -160,7 +160,7 @@
 │  │  Namespace Manager (Web UI)                  │    │
 │  │  前端：React                                  │    │
 │  │  功能：Namespace Tree Editor / Tag CRUD /     │    │
-│  │        Schema Type 管理 / ACL 設定 /          │    │
+│  │        Payload Schema 管理 / ACL 設定 /          │    │
 │  │        Per-topic Persistence Config          │    │
 │  └──────────────────┬───────────────────────────┘    │
 │                     │                                │
@@ -168,7 +168,7 @@
 │  │  Platform Backend (FastAPI)                  │    │
 │  │  - Namespace CRUD API                        │    │
 │  │  - Tag Registry API                          │    │
-│  │  - Schema Type API                           │    │
+│  │  - Payload Schema API                           │    │
 │  │  - ACL Management → EMQX REST API sync       │    │
 │  │  - Migration Engine                          │    │
 │  └──────────────────┬───────────────────────────┘    │
@@ -177,7 +177,7 @@
 │  │  Data Engine                                 │    │
 │  │  - MQTT Consumer（訂閱所有 topic）             │    │
 │  │  - Payload Decoder（JSON / Sparkplug / Text） │    │
-│  │  - Schema Matcher（payload → Schema Type）    │    │
+│  │  - Schema Matcher（payload → Payload Schema）    │    │
 │  │  - Field Extractor（JSONPath → Tag values）   │    │
 │  │  - DB Writer（batch INSERT to TimescaleDB）   │    │
 │  │  - Auto-detect Engine（自動偵測 payload 結構） │    │
@@ -229,7 +229,7 @@ Enterprise
         └── Area
               └── Line
                     └── Equipment
-                          ├── [Topic] Telemetry  ← 綁定 Schema Type
+                          ├── [Topic] Telemetry  ← 綁定 Payload Schema
                           ├── [Topic] Status
                           ├── [Topic] Alarm
                           └── [Topic] Measurement
@@ -322,12 +322,12 @@ MQTT Message 進來
 [1] Decoder（解碼 → dict）
     │
     ▼
-[2] Schema Matcher（找到對應的 Schema Type）
-    │  ├── 有 Schema Type → 用定義好的 extract rules
+[2] Schema Matcher（找到對應的 Payload Schema）
+    │  ├── 有 Payload Schema → 用定義好的 extract rules
     │  └── 沒有 → auto-detect 模式（建議 schema）
     │
     ▼
-[3] Field Extractor（依 Schema Type 拆解欄位）
+[3] Field Extractor（依 Payload Schema 拆解欄位）
     │  └── 每個欄位 → (tag_id, value, timestamp)
     │
     ▼
@@ -337,7 +337,7 @@ MQTT Message 進來
     │  └── passthrough → 不處理
     │
     ▼
-[5] Raw Storage（如果 Schema Type 設定 store_raw = true）
+[5] Raw Storage（如果 Payload Schema 設定 store_raw = true）
     │  └── INSERT to ts_raw_payloads（包含計算後的 payload_size）
     │
 [6] Metrics Update（更新 Consumer metrics / 更新 tags.last_data_at）
@@ -460,6 +460,28 @@ fields:
     type: "string"
     target_column: "sample_id"             # 映射到 ts_measurements.sample_id
     persist: true
+
+### 5.2.1 單一溢位出口與業務類別映射 (Robustness)
+
+為了在維持架構抽象化的同時處理工業現場的多樣化資料，平台實作了「單一溢位出口」機制：
+
+1. **核心原則**：
+   - **核心欄位 (Static Columns)**: 保留高頻查詢所需的欄位（如 `state`, `result`）。
+   - **自動溢位 (Overflow JSONB)**: 所有非核心、未映射或設備特有的欄位，統一自動打包進各表的 **`details`** (JSONB) 欄位中。
+   - **語義隔離**: `context` 欄位嚴格保留給系統級生產上下文補完，禁止手動映射。
+
+2. **業務類別與系統類別映射表**：
+
+| 業務類別需求 | 系統核心類別 (Table) | 區分屬性 (Discriminator) |
+| :--- | :--- | :--- |
+| **RecipeEvent** | `event` | `code_category = 'recipe'` |
+| **Maintenance** | `event` / `status` | `code_category = 'maintenance'` |
+| **QualitySamples** | `measurement` | `code_category = 'quality'` |
+
+3. **映射行為 (Target Column Rules)**：
+   - 若欄位映射至 `target_column: "details"`，資料進入溢位袋。
+   - 若欄位定義但 `target_column: null`，資料自動進入溢位袋 (Gap A 防禦)。
+   - 若欄位完全未定義於 Schema，資料自動進入溢位袋 (Auto-Discovery)。
 ```
 
 ### 5.3 欄位型別定義
@@ -654,13 +676,13 @@ CREATE TABLE ts_measurements (
 
 為了支援 Data Category 分流機制，前端管理介面須符合以下規格：
 
-#### 5.8.1 Schema Type 編輯器
+#### 5.8.1 Payload Schema 編輯器
 - **類別下拉選單**：在 Schema 新增/更新頁面中，必須提供 `category` 選單。
 - **目標欄位映射 (Target Column)**：針對非 Telemetry 類別，欄位編輯器必須支援 `target_column` 下拉選單，從目標資料表的可選欄位中選取。
 - **預設選取**：預設值應為 `telemetry`。
 
 #### 5.8.2 Schema 列表與標籤
-- **視覺標示**：在 Schema Type 列表（如 `SchemaOverview.tsx`）中，應以標籤 (Badge/Chip) 或圖示形式顯示其所屬類別。
+- **視覺標示**：在 Payload Schema 列表（如 `SchemaOverview.tsx`）中，應以標籤 (Badge/Chip) 或圖示形式顯示其所屬類別。
 - **過濾功能**：支援依據 Category 過濾 Schema 列表。
 
 #### 5.8.3 Schema 建議管理 (Feature 6 整合)
@@ -675,7 +697,7 @@ CREATE TABLE ts_measurements (
 
 ### 5.10 Schema 綁定與啟動流程 (Schema Binding & Activation)
 
-為了落實 Schema-Driven 的資料治理，Topic Node 與 Schema Type 的關聯遵循以下流程：
+為了落實 Schema-Driven 的資料治理，Topic Node 與 Payload Schema 的關聯遵循以下流程：
 
 1.  **偵測階段 (Detection)**：
     - 當 Data Engine 收到未定義的 Topic 時，進入 Auto-detection 模式。
@@ -737,13 +759,13 @@ Persist mode 設定在 `namespace_nodes` 表的 topic node 上。
 ### 6.4 Backfill 功能
 
 ```
-情境：Schema Type 修改了 extract rule（加新欄位、修正 JSONPath）。
+情境：Payload Schema 修改了 extract rule（加新欄位、修正 JSONPath）。
      過去的 raw payload 需要重新 extract。
 
 流程：
   1. 管理者在 UI 點「Backfill」
   2. 系統掃描 ts_raw_payloads 中對應 topic 的歷史 payload
-  3. 用新的 Schema Type 重新 extract
+  3. 用新的 Payload Schema 重新 extract
   4. INSERT 到 ts_telemetry（跳過已存在的 time + tag_id 組合）
   5. 顯示 backfill 結果：成功 N 筆、失敗 N 筆、新 Tag N 個
 ```
@@ -1101,7 +1123,7 @@ Platform Backend 呼叫 EMQX REST API
 ```
 場景：EAP 加工完後上傳 300 筆 trace data。
 設計決策：
-  - Schema Type field 的 array_mode = "expand"
+  - Payload Schema field 的 array_mode = "expand"
   - Data Engine 展開為 N 筆 ts_telemetry
   - 每筆的 timestamp 根據 start_time + index × interval_ms 計算
   - 用 batch INSERT (execute_values) 寫入
@@ -1126,12 +1148,12 @@ Platform Backend 呼叫 EMQX REST API
 ```
 場景：兩種設備型號 publish 到同一個 topic 但 payload 結構不同。
 設計決策：
-  - Phase 1：不允許。一個 topic node 只能綁一個 Schema Type。
+  - Phase 1：不允許。一個 topic node 只能綁一個 Payload Schema。
     → 設備必須 pub 到不同 topic。
   - Phase 2：支援 discriminator field（用 payload 的某個欄位區分）。
     → discriminator: "_meta.device_model"
-    → "ModelA" → Schema Type A
-    → "ModelB" → Schema Type B
+    → "ModelA" → Payload Schema A
+    → "ModelB" → Payload Schema B
 ```
 
 ### EC-4：非 JSON payload
@@ -1149,7 +1171,7 @@ Platform Backend 呼叫 EMQX REST API
 ```
 場景：payload.timestamp 和 MQTT receive time 不同。
 設計決策：
-  - 優先用 payload 中的 timestamp（由 Schema Type 的 timestamp_field 指定）
+  - 優先用 payload 中的 timestamp（由 Payload Schema 的 timestamp_field 指定）
   - 如果 payload 沒有 timestamp → 用 MQTT receive time
   - 如果 payload timestamp 和 receive time 差 > 5 分鐘 → 記 warning
     （可能是設備時鐘不準或網路延遲）
@@ -1184,7 +1206,7 @@ Platform Backend 呼叫 EMQX REST API
 ```
 場景：同一 field 有時是 integer，有時是 string。
 設計決策：
-  - Schema Type 定義了 type = "float" → 嘗試 cast
+  - Payload Schema 定義了 type = "float" → 嘗試 cast
   - Cast 成功 → 正常寫入
   - Cast 失敗 → 存到 raw payload，該 field 標記 type_mismatch
   - UI 顯示 ⚠️ 提醒管理者
@@ -1203,7 +1225,7 @@ Platform Backend 呼叫 EMQX REST API
 ### EC-10：資源回收桶 (Recycle Bin) 與 Soft Delete 機制
 
 ```
-場景：管理者誤刪了 Namespace Node (如 Equipment)、Schema Type，或特定的 Tag。
+場景：管理者誤刪了 Namespace Node (如 Equipment)、Payload Schema，或特定的 Tag。
 設計決策：
   - 統一採用 Soft delete（標記 `deleted_at`），禁止直接刪除 (Hard delete)。
   
@@ -1213,10 +1235,10 @@ Platform Backend 呼叫 EMQX REST API
     - EMQX ACL 移除（不再允許 pub/sub）
     - 如果仍有設備 pub 到該 topic → UI 顯示 "orphan data" 警告
     
-  [Schema Type 刪除]
-    - 將 Schema Type 放入資源回收桶 (Soft delete)
-    - 即時資料流：針對綁定該 Schema Type 的 node，若持續收到 payload，
-      因 Schema Type 進入 deleted 狀態，可視為 "schema disabled" 
+  [Payload Schema 刪除]
+    - 將 Payload Schema 放入資源回收桶 (Soft delete)
+    - 即時資料流：針對綁定該 Payload Schema 的 node，若持續收到 payload，
+      因 Payload Schema 進入 deleted 狀態，可視為 "schema disabled" 
       或直接進入 raw storage。
       
   [Tag 刪除]
@@ -1242,7 +1264,7 @@ Platform Backend 呼叫 EMQX REST API
 | Tag 身份分離 | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Live Migration | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Per-topic persist | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Schema 管理 | ✅ Schema Type | ❌ | ❌ | ❌ | Device Profile | UDT |
+| Schema 管理 | ✅ Payload Schema | ❌ | ❌ | ❌ | Device Profile | UDT |
 | ACL 管理 | ✅ → EMQX | ❌ | ✅ 內建 | 基本 | ✅ | 基本 |
 | Production Context | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | SPC / OEE | ✅ | ❌ | ❌ | ❌ | ❌ | Module |
@@ -1406,7 +1428,7 @@ Payload field = 資料的「內容」（具體是什麼 event code）
 | **Quality** | `.../Event/Quality` | QualityHold, QualityRelease, Disposition, SamplingRequired | MES / QMS |
 | **Maintenance** | `.../Event/Maintenance` | PMStarted, PMCompleted, Calibration, PartReplacement | CMMS |
 
-**新增同類的 event code 不需要改 namespace / topic / Schema Type。** 只需在 payload 的 event_code 帶新值。
+**新增同類的 event code 不需要改 namespace / topic / Payload Schema。** 只需在 payload 的 event_code 帶新值。
 
 ### 13.4 Event Payload 標準格式
 
@@ -1432,9 +1454,9 @@ Payload field = 資料的「內容」（具體是什麼 event code）
 - `ProcessCompleted` 多了 `duration_seconds`, `result`
 - `PMStarted` 有 `pm_type`, `technician`
 
-Schema Type 用 `on_schema_mismatch: "log_and_store"` 處理欄位差異。
+Payload Schema 用 `on_schema_mismatch: "log_and_store"` 處理欄位差異。
 
-#### 12.3 JSON Schema 結構 (Schema Type)
+#### 12.3 JSON Schema 結構 (Payload Schema)
 ```json
 {
   "type_name": "Fanuc_Robot_Telemetry",
@@ -1484,10 +1506,10 @@ MVP 階段的 Data Engine 支援以下三種核心模式：
 所有非 `ts_telemetry` 的目標資料表（如 `ts_events`, `ts_alarms`, `ts_measurements`, `ts_status`）除了具備標準查詢欄位（如 `severity`, `code`）外，**必須包含 `details` (JSONB) 欄位**。
 任何無法對應到標準欄位的異質資料（如特定機台專有參數），都將被 Data Engine 打包存入 `details` 中，保留後續 SQL (JSONB operator) 的查詢彈性，避免修改 Database Schema。
 
-### 13.5 Event Schema Type 範例
+### 13.5 Event Payload Schema 範例
 
 ```yaml
-Schema Type: "Equipment_Event_Process"
+Payload Schema: "Equipment_Event_Process"
   decoder: "json"
   timestamp_field: "_meta.timestamp"
   store_raw: true
@@ -1789,7 +1811,7 @@ UNS MCP Server = 讓任何 LLM 都能和 UNS 平台互動的橋樑。
 | `uns://namespace/tree` | 完整 Namespace 結構 (JSON) | LLM 理解工廠全貌 |
 | `uns://tags/{tag_id}/metadata` | Tag 定義 (name, unit, type, desc) | LLM 理解資料語義 |
 | `uns://equipment/{path}/status` | 設備即時狀態 | LLM 判斷設備健康 |
-| `uns://schema-types` | 所有 Schema Type 定義 | LLM 理解 payload 結構 |
+| `uns://schema-types` | 所有 Payload Schema 定義 | LLM 理解 payload 結構 |
 
 ### 15.4 MCP Server 架構
 
@@ -1855,14 +1877,14 @@ Phase 1（PoC）只做 3 個 Tools：
 |---|---|
 | **Namespace** | MQTT topic tree 的完整階層結構，遵循 ISA-95 |
 | **Namespace Node** | 樹上的一個節點，可以是 structural（純階層）或 topic（可收發資料）|
-| **Schema Type** | Payload 結構的可重用定義，類似 class |
+| **Payload Schema** | Payload 結構的可重用定義，類似 class |
 | **Tag** | 一個獨立的時間序列資料點（如「Line1 印刷機溫度」），擁有永久 tag_id |
 | **tag_source_mapping** | MQTT topic → tag_id 的對應關係，可變更 |
 | **Persist Mode** | 每個 topic 的持久化策略（db / retain / passthrough）|
 | **Deadband** | 值變化量小於此門檻時跳過寫入，減少資料量 |
-| **Backfill** | 修改 Schema Type 後，重新掃描 raw payload 補提取歷史資料 |
+| **Backfill** | 修改 Payload Schema 後，重新掃描 raw payload 補提取歷史資料 |
 | **Live Migration** | 移動 namespace node 時自動更新 tag_source_mapping，歷史資料不中斷 |
-| **Auto-detect** | 自動偵測未定義 topic 的 payload 結構，產生 Schema Type 建議 |
+| **Auto-detect** | 自動偵測未定義 topic 的 payload 結構，產生 Payload Schema 建議 |
 | **Production Context** | 把 IoT 資料和 MES 的 Lot / Step / Recipe 關聯 |
 | **EAV** | Entity-Attribute-Value 模式：每個參數值一筆 row（vs 每個參數一個 column）|
 | **Command Flow** | MES 對設備下命令的流程；命令走直接通道，UNS 記錄 event |

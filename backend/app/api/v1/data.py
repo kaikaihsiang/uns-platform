@@ -1,14 +1,14 @@
 """
 Data Write API
 """
+import asyncio
 import json
+import os
 import traceback
 from datetime import datetime, timezone
 
-import asyncio
-import os
 import paho.mqtt.publish as publish
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException
 
 from app.schemas import DataWriteRequest
 

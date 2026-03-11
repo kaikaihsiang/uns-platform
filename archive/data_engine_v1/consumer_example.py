@@ -21,14 +21,14 @@ UNS Consumer 範例：解析 MQTT Topic/Payload，寫入 TimescaleDB
 
 import asyncio
 import json
-import signal
 import logging
+import signal
 from datetime import datetime
 from typing import Optional
 
 import psycopg2
-from psycopg2.extras import Json
 from gmqtt import Client as MQTTClient
+from psycopg2.extras import Json
 
 # =============================================================================
 # 設定

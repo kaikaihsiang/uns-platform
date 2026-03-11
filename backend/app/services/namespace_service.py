@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import NamespaceNode, Tag, TagSourceMapping, TagChangeLog
+from app.models import NamespaceNode, Tag, TagChangeLog, TagSourceMapping
 
 
 async def get_all_nodes(db: AsyncSession):
@@ -157,6 +157,7 @@ async def move_node(db: AsyncSession, node_id: int, new_parent_id: int | None) -
 
 
 from app.services import tag_service
+
 
 async def soft_delete_node(db: AsyncSession, node_id: int) -> NamespaceNode:
     """Soft delete Node（標記 deleted_at）。"""

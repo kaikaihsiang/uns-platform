@@ -28,11 +28,9 @@ spc_tool.py — SPC 分析 CLI 工具
 """
 
 import argparse
-import json
 import math
 import os
 import sys
-from datetime import datetime
 
 import psycopg2
 
@@ -103,16 +101,16 @@ def cmd_cpk(conn, args):
         )
 
         print(f"\n  Product: {product or 'ALL'}")
-        print(f"  ┌─────────────────────────────────────────────┐")
+        print("  ┌─────────────────────────────────────────────┐")
         print(f"  │  n = {n:<8d}                               │")
         print(f"  │  X̄ = {mean:<10.4f}  σ = {std:<10.4f}       │")
         print(f"  │  USL = {usl:<8.2f}  LSL = {lsl:<8.2f}        │")
         print(f"  │  Target = {target or 'N/A':<8}                      │")
-        print(f"  │                                             │")
+        print("  │                                             │")
         print(f"  │  Cp  = {cp:<8.3f}                           │")
         print(f"  │  CPU = {cpu:<8.3f}  CPL = {cpl:<8.3f}        │")
         print(f"  │  Cpk = {cpk:<8.3f}  → {judgment:<20s} │")
-        print(f"  └─────────────────────────────────────────────┘")
+        print("  └─────────────────────────────────────────────┘")
 
     print()
 
@@ -261,7 +259,7 @@ def cmd_correlation(conn, args):
         return
 
     print("=" * 60)
-    print(f"  製程-品質關聯分析")
+    print("  製程-品質關聯分析")
     print(f"  Product:       {args.product}")
     print(f"  製程參數 (X):  {args.process_param}")
     print(f"  品質參數 (Y):  {args.quality_param}")

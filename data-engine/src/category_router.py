@@ -8,6 +8,7 @@ UNS Data Engine — Category Router
 """
 
 import logging
+
 from .schema_matcher import SchemaMatch
 
 logger = logging.getLogger("uns.category_router")

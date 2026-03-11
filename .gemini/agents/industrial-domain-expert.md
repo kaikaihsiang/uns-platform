@@ -12,7 +12,7 @@ tools:
   - grep_search
   - glob
   - run_shell_command
-model: gemini-2.5-pro
+model: gemini-3.1-pro
 ---
 
 You are the Industrial Domain Expert for the UNS Namespace Data Platform.

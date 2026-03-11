@@ -9,11 +9,11 @@ Batch INSERT to ts_telemetry + ts_raw_payloads (Dual Storage)。
 import logging
 import threading
 import time
-from datetime import datetime, timezone
-from typing import Optional, Union
+from datetime import datetime
+from typing import Optional
 
-import psycopg2
-from psycopg2.extras import execute_values, Json
+from psycopg2.extras import Json, execute_values
+
 from .db_pool import DBPool
 
 logger = logging.getLogger("uns.db_writer")

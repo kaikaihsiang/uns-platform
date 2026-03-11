@@ -30,11 +30,9 @@ schema_validator.py — UNS Schema 驗證器
     pip install psycopg2-binary jsonschema genson
 """
 
-import json
 import logging
 from typing import Optional
 
-import psycopg2
 from psycopg2.extras import Json
 
 logger = logging.getLogger("uns_consumer.schema")

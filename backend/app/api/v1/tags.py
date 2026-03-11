@@ -8,8 +8,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.schemas import (
-    TagCreate, TagUpdate, TagOut, TagDetailOut, TagMappingOut, TagChangeLogOut,
-    TagValueOut, TagValuesResponse, TagLatestResponse,
+    TagChangeLogOut,
+    TagCreate,
+    TagDetailOut,
+    TagLatestResponse,
+    TagMappingOut,
+    TagOut,
+    TagUpdate,
+    TagValueOut,
+    TagValuesResponse,
 )
 from app.services import tag_service
 

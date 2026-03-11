@@ -1,8 +1,10 @@
-import pytest
 import json
 from datetime import datetime, timezone
+
+import pytest
 from src.field_extractor import FieldExtractor
-from src.schema_matcher import SchemaMatch, FieldDef
+from src.schema_matcher import FieldDef, SchemaMatch
+
 
 @pytest.fixture
 def extractor():
@@ -10,7 +12,10 @@ def extractor():
 
 @pytest.fixture
 def sample_payloads():
-    with open("../docs/payload_samples.json", "r") as f:
+    import os
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    path = os.path.join(base_dir, "../../docs/payload_samples.json")
+    with open(path, "r") as f:
         return json.load(f)
 
 def test_extract_telemetry_nested(extractor, sample_payloads):
@@ -88,3 +93,92 @@ def test_extract_unknown_fields_flat_data(extractor):
     unknown_val = next(r for r in results if r.field_name == "unknown")
     assert unknown_val.is_schema_defined is False
     assert unknown_val.value == 200.0
+
+
+def test_overflow_marking(extractor):
+    """
+    驗證 FieldExtractor 的 overflow 標記邏輯。
+    """
+    payload = {
+        "data": {
+            "mapped_col": "STATE-01",
+            "mapped_details": "RECP-123",
+            "unmapped": 456,
+            "unknown": 789
+        }
+    }
+    schema = SchemaMatch(
+        node_id=1, full_path="test/event", persist_mode="db", retention_days=30,
+        schema_category="event",
+        fields=[
+            # 1. 映射到實體欄位 -> overflow 應為 False
+            FieldDef(name="mapped_col", path="$.data.mapped_col", type="string", target_column="event_code"),
+            # 2. 映射到 details -> overflow 應為 True
+            FieldDef(name="mapped_details", path="$.data.mapped_details", type="string", target_column="details"),
+            # 3. 定義但未映射 -> overflow 應為 True
+            FieldDef(name="unmapped", path="$.data.unmapped", type="float", target_column=None)
+        ]
+    )
+    
+    results = extractor.extract(payload, schema)
+    
+    # 預期結果：
+    # - mapped_col: overflow=False
+    # - mapped_details: overflow=True
+    # - unmapped: overflow=True
+    # - unknown: overflow=True (自動捕捉)
+    
+    col_val = next(r for r in results if r.field_name == "mapped_col")
+    assert col_val.overflow is False
+    
+    details_val = next(r for r in results if r.field_name == "mapped_details")
+    assert details_val.overflow is True
+    
+    unmapped_val = next(r for r in results if r.field_name == "unmapped")
+    assert unmapped_val.overflow is True
+    
+    unknown_val = next(r for r in results if r.field_name == "unknown")
+    assert unknown_val.overflow is True
+    assert unknown_val.is_schema_defined is False
+
+
+def test_extract_array_modes(extractor):
+    """
+    驗證不同的 array_mode 處理邏輯。
+    """
+    payload = {
+        "data": {
+            "temps": [20.0, 22.0, 24.0]
+        }
+    }
+    
+    # 1. Mode: single (取第一個)
+    schema_single = SchemaMatch(
+        node_id=1, full_path="test", persist_mode="db", retention_days=30,
+        fields=[FieldDef(name="t", path="$.data.temps", type="float", array_mode="single")]
+    )
+    res_single = extractor.extract(payload, schema_single)
+    assert len(res_single) == 1
+    assert res_single[0].value == 20.0
+
+    # 2. Mode: avg (取平均)
+    schema_avg = SchemaMatch(
+        node_id=1, full_path="test", persist_mode="db", retention_days=30,
+        fields=[FieldDef(name="t", path="$.data.temps", type="float", array_mode="avg")]
+    )
+    res_avg = extractor.extract(payload, schema_avg)
+    assert res_avg[0].value == 22.0
+
+    # 3. Mode: expand (展開)
+    schema_expand = SchemaMatch(
+        node_id=1, full_path="test", persist_mode="db", retention_days=30,
+        fields=[FieldDef(name="t", path="$.data.temps", type="float", array_mode="expand")]
+    )
+    res_expand = extractor.extract(payload, schema_expand)
+    assert len(res_expand) == 3
+    assert res_expand[0].value == 20.0
+    assert res_expand[1].value == 22.0
+    assert res_expand[2].value == 24.0
+    assert res_expand[1].field_name == "t[1]"
+    assert res_expand[1].tag_suffix == "t_1"
+

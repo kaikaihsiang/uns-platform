@@ -22,7 +22,7 @@ class ExtractedValue:
     __slots__ = (
         "field_name", "tag_suffix", "value", "value_text", "value_json",
         "field_type", "unit", "deadband", "timestamp", "persist", "target_column",
-        "is_schema_defined"
+        "is_schema_defined", "overflow"
     )
 
     def __init__(
@@ -38,7 +38,8 @@ class ExtractedValue:
         timestamp: Optional[datetime] = None,
         persist: bool = True,
         target_column: Optional[str] = None,
-        is_schema_defined: bool = True
+        is_schema_defined: bool = True,
+        overflow: bool = False
     ):
         self.field_name = field_name
         self.tag_suffix = tag_suffix
@@ -52,6 +53,7 @@ class ExtractedValue:
         self.persist = persist
         self.target_column = target_column
         self.is_schema_defined = is_schema_defined
+        self.overflow = overflow
 
 
 # jsonpath expression 快取（避免重複 parse）
@@ -194,7 +196,8 @@ class FieldExtractor:
                         timestamp=timestamp,
                         persist=True,
                         target_column=None,
-                        is_schema_defined=False
+                        is_schema_defined=False,
+                        overflow=True
                     ))
 
         return results
@@ -234,17 +237,20 @@ class FieldExtractor:
             return self._handle_array(raw_value, field_def, timestamp)
 
         val_f, val_t, val_j = _coerce_value(raw_value, field_def.type)
+        is_overflow = field_def.target_column is None or field_def.target_column == "details"
         return [ExtractedValue(
             field_name=field_def.name, tag_suffix=field_def.name,
             value=val_f, value_text=val_t, value_json=val_j,
             field_type=field_def.type, unit=field_def.unit,
             deadband=field_def.deadband, timestamp=timestamp,
             persist=field_def.persist, target_column=field_def.target_column,
+            overflow=is_overflow
         )]
 
     def _handle_array(self, values: list, field_def: FieldDef, timestamp: datetime) -> list[ExtractedValue]:
         if not values: return []
         mode = field_def.array_mode
+        is_overflow = field_def.target_column is None or field_def.target_column == "details"
         if mode == "single" or mode == "last":
             raw = values[0] if mode == "single" else values[-1]
             val_f, val_t, val_j = _coerce_value(raw, field_def.type)
@@ -253,7 +259,8 @@ class FieldExtractor:
                 value=val_f, value_text=val_t, value_json=val_j,
                 field_type=field_def.type, unit=field_def.unit,
                 deadband=field_def.deadband, timestamp=timestamp,
-                persist=field_def.persist, target_column=field_def.target_column
+                persist=field_def.persist, target_column=field_def.target_column,
+                overflow=is_overflow
             )]
         elif mode == "avg":
             numeric = [float(v) for v in values if isinstance(v, (int, float, str))]
@@ -262,7 +269,8 @@ class FieldExtractor:
                 field_name=field_def.name, tag_suffix=field_def.name,
                 value=sum(numeric)/len(numeric), field_type=field_def.type,
                 unit=field_def.unit, deadband=field_def.deadband,
-                timestamp=timestamp, persist=field_def.persist, target_column=field_def.target_column
+                timestamp=timestamp, persist=field_def.persist, target_column=field_def.target_column,
+                overflow=is_overflow
             )]
         elif mode == "expand":
             results = []
@@ -273,7 +281,8 @@ class FieldExtractor:
                     value=val_f, value_text=val_t, value_json=val_j,
                     field_type=field_def.type, unit=field_def.unit,
                     deadband=field_def.deadband, timestamp=timestamp,
-                    persist=field_def.persist, target_column=field_def.target_column
+                    persist=field_def.persist, target_column=field_def.target_column,
+                    overflow=is_overflow
                 ))
             return results
         return []

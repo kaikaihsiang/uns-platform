@@ -5,13 +5,12 @@ UNS Data Engine — DB Connection Pool
 提供 connection() context manager 並處理斷線重連。
 """
 
-import logging
 import contextlib
-import time
+import logging
 from typing import Generator
 
 import psycopg2
-from psycopg2 import pool
+
 from .config import Config
 
 logger = logging.getLogger("uns.db_pool")

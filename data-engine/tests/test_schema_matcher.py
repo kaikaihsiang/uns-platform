@@ -2,7 +2,7 @@
 Tests for UNS Data Engine — Schema Matcher
 """
 
-from src.schema_matcher import SchemaMatcher, SchemaMatch, FieldDef
+from src.schema_matcher import FieldDef, SchemaMatch, SchemaMatcher
 
 
 class TestSchemaMatcher:

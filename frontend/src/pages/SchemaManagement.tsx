@@ -26,7 +26,7 @@ import {
     MinusCircleOutlined,
 } from '@ant-design/icons';
 import { useSchemaStore } from '../store/schemaStore';
-import type { SchemaTypeOut, SchemaTypeCreate, SchemaTypeUpdate } from '../types/namespace';
+import type { PayloadSchemaOut, PayloadSchemaCreate, PayloadSchemaUpdate } from '../types/namespace';
 
 const { Title, Paragraph, Text } = Typography;
 
@@ -113,7 +113,7 @@ export default function SchemaManagement() {
         setModalOpen(true);
     };
 
-    const handleEdit = (record: SchemaTypeOut) => {
+    const handleEdit = (record: PayloadSchemaOut) => {
         setEditingId(record.schema_id);
         form.setFieldsValue({
             schema_name: record.schema_name,
@@ -154,9 +154,9 @@ export default function SchemaManagement() {
             };
 
             if (editingId) {
-                success = await updateSchema(editingId, payload as SchemaTypeUpdate);
+                success = await updateSchema(editingId, payload as PayloadSchemaUpdate);
             } else {
-                success = await createSchema(payload as SchemaTypeCreate);
+                success = await createSchema(payload as PayloadSchemaCreate);
             }
 
             if (success) {
@@ -173,7 +173,7 @@ export default function SchemaManagement() {
             title: 'Schema 名稱',
             dataIndex: 'schema_name',
             key: 'schema_name',
-            render: (text: string, r: SchemaTypeOut) => (
+            render: (text: string, r: PayloadSchemaOut) => (
                 <Space direction="vertical" size={0}>
                     <Text strong style={{ color: 'var(--color-primary)' }}>{text}</Text>
                     {r.schema_category && (
@@ -200,12 +200,12 @@ export default function SchemaManagement() {
                 { text: 'Measurement', value: 'measurement' },
                 { text: 'Metrics', value: 'metrics' },
             ],
-            onFilter: (value: any, record: SchemaTypeOut) => record.schema_category === value,
+            onFilter: (value: any, record: PayloadSchemaOut) => record.schema_category === value,
         },
         {
             title: '解碼器配置',
             key: 'decoder_config',
-            render: (_: any, r: SchemaTypeOut) => (
+            render: (_: any, r: PayloadSchemaOut) => (
                 <div style={{ fontSize: 12 }}>
                     <div><Text type="secondary">Decoder:</Text> <Tag color="blue">{r.decoder}</Tag></div>
                     {r.timestamp_field && <div><Text type="secondary">TS_Field:</Text> <code>{r.timestamp_field}</code></div>}
@@ -233,7 +233,7 @@ export default function SchemaManagement() {
         {
             title: '演化策略',
             key: 'evolution',
-            render: (_: any, r: SchemaTypeOut) => (
+            render: (_: any, r: PayloadSchemaOut) => (
                 <div style={{ fontSize: 12 }}>
                     <div><Text type="secondary">Mismatch:</Text> {r.on_schema_mismatch}</div>
                     <div><Text type="secondary">NewField:</Text> {r.on_new_field}</div>
@@ -244,7 +244,7 @@ export default function SchemaManagement() {
             title: '操作',
             key: 'action',
             width: 100,
-            render: (_: any, record: SchemaTypeOut) => (
+            render: (_: any, record: PayloadSchemaOut) => (
                 <Space size="small">
                     <Button type="text" icon={<EditOutlined />} onClick={() => handleEdit(record)} />
                     <Popconfirm

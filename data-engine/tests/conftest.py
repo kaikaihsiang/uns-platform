@@ -1,10 +1,9 @@
-import pytest
-import psycopg2
 import json
-from unittest.mock import MagicMock
 from datetime import datetime, timezone
+from unittest.mock import MagicMock
+
+import pytest
 from src.db_pool import DBPool
-from src.config import Config
 
 # --- Mock DB Infrastructure (for unit tests) ---
 

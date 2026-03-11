@@ -30,7 +30,7 @@
 
 ### 2.2 核心原則：Core Columns + Overflow JSONB
 *   **核心欄位 (Static Columns)**: 保留高頻查詢與基礎分析所需的欄位（如 `lot_id`, `state`, `value`, `result`）。這些欄位在資料庫中獨立存在，提供極致性能。
-*   **自動溢位 (Overflow JSONB)**: 將所有非核心、動態變動、或設備特有的欄位自動打包進 `details` (in events/status) 或 `context` (in measurements) JSONB 欄位中。
+*   **自動溢位 (Overflow JSONB)**: 所有非核心、動態變動、或設備特有的欄位，統一自動打包進 **`details`** (JSONB) 欄位中。`context` 欄位保留給系統級別的自動補完邏輯，不作為業務溢位使用。
 
 ---
 
@@ -63,19 +63,23 @@
 2.  手動定義但 `target_column` 為空的欄位。
 3.  Payload 中自動捕捉到的「遺珠」欄位 (Unknown fields)。
 
-### 4.3 寫入引擎：實作自動打包器
-在 `DBWriter` 執行 `INSERT` 前，將所有 `overflow=True` 的欄位彙整成一個 Python Dictionary，確保它們被安全地存入資料庫的 JSONB 容器中。
+### 4.4 關鍵規範：單一溢位出口 (Single Overflow Exit)
+為了確保系統健壯性並避免與生產上下文（Production Context）自動補完邏輯產生衝突，確立以下欄位語義：
+
+*   **`details` (業務溢位袋)**：唯一開放給使用者手動映射的 JSONB 欄位。所有「非核心實體欄位」且「不屬於自動補完資訊」的資料點，應統一映射至此。
+*   **`context` (系統上下文)**：由系統內部（如 `pipeline.py` 的 `production_run` 邏輯）自動填入，儲存 Lot/Step/Recipe 等關聯資訊。
+*   **禁止映射**：嚴格禁止在 Payload Schema 定義中將 `target_column` 設為 `context`，以防止覆蓋系統自動產生的生產上下文。
 
 ---
 
-## 5. 後續實作路徑圖 (Implementation Roadmap)
+## 5. 後續實作路徑圖 (Implementation Roadmap) - 已更新
 
-| 階段 | 任務說明 | 目標解決 |
+| 階段 | 任務說明 | 狀態 |
 | :--- | :--- | :--- |
-| **Phase 1: Backend** | 修改 Pydantic 驗證器，允許 `details/context` 映射。 | **Gap B** |
-| **Phase 2: Extractor** | 修改 `FieldExtractor` 邏輯，明確標記 `overflow` 狀態。 | **Gap A** |
-| **Phase 3: DBWriter** | 實作寫入前的 JSONB 彙整與打包功能。 | **Gap C** |
-| **Phase 4: Validation** | 建立 `RecipeEvent` 示範，驗證所有動態欄位正確進入 `details`。 | **全系統驗證** |
+| **Phase 1: Backend** | 重構命名為 `PayloadSchema`，允許 `details` 映射（排除 `context`）。 | ⏳ 執行中 |
+| **Phase 2: Extractor** | 修改 `FieldExtractor` 標記 `overflow=True` (所有 target_column 為 None 或 details 的欄位)。 | 📅 待執行 |
+| **Phase 3: DBWriter** | 實作 `DBWriter` 寫入前自動彙整 `overflow=True` 的資料至 `details`。 | 📅 待執行 |
+| **Phase 4: Validation** | 建立 `RecipeEvent` 示範，驗證所有動態欄位正確進入 `details`。 | 📅 待執行 |
 
 ---
 

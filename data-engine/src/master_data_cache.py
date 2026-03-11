@@ -1,6 +1,7 @@
 import logging
 import time
-from typing import Optional, Dict, Tuple
+from typing import Dict, Optional, Tuple
+
 from .db_pool import DBPool
 
 logger = logging.getLogger("uns.master_data_cache")

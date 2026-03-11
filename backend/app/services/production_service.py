@@ -1,10 +1,12 @@
-from typing import List, Optional
 from datetime import datetime, timezone
+from typing import List, Optional
+
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.production import ProductionRun
 from app.schemas.production import ProductionRunCreate, ProductionRunUpdate
+
 
 class ProductionService:
     @staticmethod

@@ -1,11 +1,9 @@
-import asyncio
 import json
 import logging
 import time
-from datetime import datetime, timezone
-import psycopg2
 
 import paho.mqtt.client as mqtt
+import psycopg2
 
 # Configuration
 BROKER = "localhost"

@@ -3,8 +3,7 @@ Tests for UNS Data Engine — Decoder
 """
 
 import pytest
-
-from src.decoder import JsonDecoder, DecodeResult, get_decoder
+from src.decoder import JsonDecoder, get_decoder
 
 
 class TestJsonDecoder:

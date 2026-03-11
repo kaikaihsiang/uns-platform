@@ -38,7 +38,6 @@ import os
 import shutil
 import tempfile
 from datetime import datetime, timedelta
-from pathlib import Path
 
 import pandas as pd
 import psycopg2
@@ -174,13 +173,13 @@ def archive_category(conn, category: str, cat_config: dict,
     # 計算筆數
     row_count = count_expired_rows(conn, table, cutoff)
     if row_count == 0:
-        logger.info(f"  ✅ 沒有超期資料，跳過")
+        logger.info("  ✅ 沒有超期資料，跳過")
         return {"category": category, "rows": 0, "status": "skipped"}
 
     logger.info(f"  待歸檔: {row_count:,} 筆")
 
     if dry_run:
-        logger.info(f"  [DRY RUN] 不執行實際歸檔")
+        logger.info("  [DRY RUN] 不執行實際歸檔")
         return {"category": category, "rows": row_count, "status": "dry_run"}
 
     # 產生檔案路徑
@@ -222,7 +221,7 @@ def archive_category(conn, category: str, cat_config: dict,
         deleted = delete_archived_chunks(conn, table, cutoff)
     else:
         deleted = 0
-        logger.info(f"  保留原始資料（delete_after_archive=false）")
+        logger.info("  保留原始資料（delete_after_archive=false）")
 
     logger.info(f"  ✅ 歸檔完成: {exported:,} 筆匯出, {deleted} chunks 刪除")
     return {
@@ -264,7 +263,7 @@ def main():
             logger.error(f"找不到 category: {args.category}")
             return
 
-    logger.info(f"連接 TimescaleDB...")
+    logger.info("連接 TimescaleDB...")
     conn = psycopg2.connect(args.db_url)
 
     results = []

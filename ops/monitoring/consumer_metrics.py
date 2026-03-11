@@ -22,17 +22,16 @@ consumer_metrics.py — UNS Consumer 的 Prometheus 指標模組
     pip install prometheus_client
 """
 
-import time
 import logging
+import time
 from contextlib import contextmanager
 
 from prometheus_client import (
     Counter,
-    Histogram,
     Gauge,
+    Histogram,
     Info,
     start_http_server,
-    REGISTRY,
 )
 
 logger = logging.getLogger("uns_consumer.metrics")

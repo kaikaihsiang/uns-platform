@@ -7,11 +7,12 @@ UNS Data Engine - E2E Verification Script
 4. (斷線重連請以 Docker 重啟手動測試，此腳本不含此項)
 """
 
-import time
 import json
 import logging
-import psycopg2
+import time
+
 import paho.mqtt.publish as publish
+import psycopg2
 from src.config import Config
 
 logging.basicConfig(level=logging.INFO)

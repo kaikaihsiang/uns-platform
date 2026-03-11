@@ -37,7 +37,6 @@ import logging
 from datetime import datetime, timedelta
 from typing import Optional
 
-import psycopg2
 from psycopg2.extras import Json, execute_values
 
 logger = logging.getLogger("uns_consumer.production_context")

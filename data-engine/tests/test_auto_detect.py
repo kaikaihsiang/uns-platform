@@ -1,6 +1,7 @@
 import pytest
 from src.auto_detect import AutoDetector
 
+
 @pytest.fixture
 def detector():
     # Set threshold to 2 for faster unit testing

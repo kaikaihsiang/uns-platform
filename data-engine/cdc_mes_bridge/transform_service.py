@@ -21,8 +21,8 @@ import logging
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from confluent_kafka import Consumer as KafkaConsumer
 import paho.mqtt.client as mqtt
+from confluent_kafka import Consumer as KafkaConsumer
 
 # =============================================================================
 # 設定

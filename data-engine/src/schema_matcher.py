@@ -10,7 +10,6 @@ import time
 from dataclasses import dataclass, field
 from typing import Optional
 
-import psycopg2
 from .db_pool import DBPool
 
 logger = logging.getLogger("uns.schema_matcher")
