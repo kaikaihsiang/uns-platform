@@ -69,6 +69,20 @@ jobs:
 
   data-engine-tests:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: timescale/timescaledb:latest-pg16
+        env:
+          POSTGRES_DB: uns_test
+          POSTGRES_USER: uns_admin
+          POSTGRES_PASSWORD: uns_dev_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v4
       - name: Set up Python
@@ -78,6 +92,21 @@ jobs:
       - name: Install dependencies
         run: |
           pip install pytest pytest-asyncio jsonpath-ng psycopg2-binary httpx gmqtt
+      - name: Initialize Database Schema
+        env:
+          PGPASSWORD: uns_dev_password
+        run: |
+          sudo apt-get update && sudo apt-get install -y postgresql-client
+          until pg_isready -h localhost -p 5432 -U uns_admin; do
+            echo "Waiting for database..."
+            sleep 2
+          done
+          for f in docker/init-db/*.sql; do
+            echo "Executing $f..."
+            psql -h localhost -U uns_admin -d uns_test -f "$f"
+          done
+          echo "Defining test helpers..."
+          psql -h localhost -U uns_admin -d uns_test -f ops/init_test_db.sql
       - name: Run tests
         env:
           PYTHONPATH: ${{ github.workspace }}/data-engine
