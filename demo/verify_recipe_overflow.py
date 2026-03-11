@@ -9,6 +9,7 @@ from src.field_extractor import FieldExtractor
 from src.pipeline import Pipeline
 from src.schema_matcher import FieldDef, SchemaMatch
 
+
 # 模擬 Mock 物件
 class MockSchemaMatcher:
     def match(self, topic):
