@@ -10,6 +10,7 @@ import logging
 from typing import Generator
 
 import psycopg2
+import psycopg2.pool
 
 from .config import Config
 

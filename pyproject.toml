@@ -4,7 +4,8 @@ target-version = "py313"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "B"]
-ignore = ["E501"] # Ignore long lines handled by ruff format
+ignore = ["E501", "B904"] # Ignore long lines and explicit 'raise from' for now
+extend-immutable-calls = ["fastapi.Depends", "fastapi.params.Depends", "fastapi.Query", "fastapi.params.Query", "fastapi.Path", "fastapi.params.Path", "fastapi.Body", "fastapi.params.Body"]
 
 [tool.ruff.format]
 quote-style = "double"

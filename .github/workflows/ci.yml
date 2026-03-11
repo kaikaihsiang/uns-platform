@@ -44,7 +44,7 @@ jobs:
           python-version: '3.13'
       - name: Install dependencies
         run: |
-          pip install fastapi uvicorn sqlalchemy asyncpg psycopg2-binary pydantic-settings httpx pytest pytest-asyncio pytest-env greenlet
+          pip install fastapi uvicorn sqlalchemy asyncpg psycopg2-binary pydantic-settings httpx pytest pytest-asyncio pytest-env greenlet paho-mqtt google-genai
       - name: Initialize Database Schema
         env:
           PGPASSWORD: uns_dev_password
