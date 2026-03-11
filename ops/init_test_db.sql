@@ -258,6 +258,8 @@ CREATE TABLE IF NOT EXISTS ts_metrics (
     sub_metric_code TEXT,
     period          TEXT,
     values          JSONB NOT NULL,
+    run_id          INTEGER,
+    lot_id          TEXT,
     context         JSONB,
     details         JSONB
 );
@@ -284,7 +286,9 @@ CREATE TABLE IF NOT EXISTS ts_raw_payloads (
     mqtt_topic    TEXT NOT NULL,
     payload       JSONB NOT NULL,
     payload_size  INTEGER,
-    schema_id     INTEGER
+    schema_id     INTEGER,
+    run_id        INTEGER,
+    lot_id        TEXT
 );
 
 SELECT create_hypertable('ts_raw_payloads', 'time', if_not_exists => TRUE);

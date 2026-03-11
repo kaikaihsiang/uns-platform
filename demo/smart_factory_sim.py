@@ -164,14 +164,21 @@ def main():
         elif args.scenario == "lifecycle":
             print("--- Starting Production Lifecycle ---")
             lot_id = f"LOT-{random.randint(1000, 9999)}"
+            publish_scenario_telemetry(client)
+            time.sleep(args.interval)
+            publish_scenario_telemetry(client)
+            time.sleep(args.interval)
             publish_scenario_event(client, "LOT_DISPATCHED", lot_id)
             time.sleep(args.interval)
             publish_scenario_event(client, "RECIPE_DOWNLOAD", lot_id)
+            publish_scenario_telemetry(client)
+            time.sleep(args.interval)
             publish_scenario_status(client, "PRD", "SET")
             time.sleep(args.interval)
             publish_scenario_event(client, "MATERIAL_LOAD", lot_id)
             time.sleep(args.interval)
             publish_scenario_event(client, "LOT_START", lot_id)
+            time.sleep(args.interval)
             publish_scenario_status(client, "PRD", "RUN")
             time.sleep(args.interval)
 
@@ -190,7 +197,11 @@ def main():
             time.sleep(args.interval)
             publish_scenario_event(client, "LOT_END", lot_id)
             time.sleep(args.interval)
+            publish_scenario_telemetry(client)
+            time.sleep(args.interval)
             publish_scenario_status(client, "SBY", "IDL")
+            publish_scenario_telemetry(client)
+            time.sleep(args.interval)
             print("--- Lifecycle Completed ---")
 
         if i < args.count - 1:

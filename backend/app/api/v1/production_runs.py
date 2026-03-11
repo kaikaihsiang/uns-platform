@@ -64,3 +64,18 @@ async def search_history_runs(
     4. Search History Runs: Query historical production contexts.
     """
     return await ProductionService.search_history_runs(db, equipment_path, lot_id, start_time, end_time)
+
+
+@router.get("/{run_id}/data")
+async def get_run_data(
+    run_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    5. Get Run Data: Fetch all telemetry, status, and alarms associated with a run.
+    Used for drill-down charts.
+    """
+    data = await ProductionService.get_run_data(db, run_id)
+    if not data:
+        raise HTTPException(status_code=404, detail="Run data not found")
+    return data

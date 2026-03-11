@@ -15,19 +15,31 @@ export interface ProductionRun {
     context?: Record<string, any> | null;
 }
 
+export interface ProductionRunData {
+    telemetry: any[];
+    status: any[];
+    alarms: any[];
+    events: any[];
+    measurements: any[];
+    metrics: any[];
+}
+
 interface ProductionState {
     activeRuns: ProductionRun[];
     historyRuns: ProductionRun[];
+    runDataCache: Record<number, ProductionRunData>; // run_id -> data
     isLoading: boolean;
     error: string | null;
 
     fetchActiveRuns: (equipmentPath?: string) => Promise<void>;
     searchHistoryRuns: (params?: { equipment_path?: string; lot_id?: string; start_time?: string }) => Promise<void>;
+    fetchRunData: (runId: number) => Promise<void>;
 }
 
-export const useProductionStore = create<ProductionState>((set) => ({
+export const useProductionStore = create<ProductionState>((set, get) => ({
     activeRuns: [],
     historyRuns: [],
+    runDataCache: {},
     isLoading: false,
     error: null,
 
@@ -55,6 +67,25 @@ export const useProductionStore = create<ProductionState>((set) => ({
         } catch (error: any) {
             set({
                 error: error.response?.data?.detail || 'Failed to search history runs',
+                isLoading: false
+            });
+        }
+    },
+
+    fetchRunData: async (runId) => {
+        // Skip if already cached
+        if (get().runDataCache[runId]) return;
+
+        set({ isLoading: true, error: null });
+        try {
+            const response = await api.get(`/production-runs/${runId}/data`);
+            set((state) => ({
+                runDataCache: { ...state.runDataCache, [runId]: response.data },
+                isLoading: false
+            }));
+        } catch (error: any) {
+            set({
+                error: error.response?.data?.detail || `Failed to fetch data for run ${runId}`,
                 isLoading: false
             });
         }

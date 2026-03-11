@@ -101,3 +101,76 @@ class ProductionService:
         await db.commit()
         await db.refresh(db_run)
         return db_run
+
+    @staticmethod
+    async def get_run_data(db: AsyncSession, run_id: int) -> dict:
+        """
+        Fetch all time-series data associated with a production run (All 6 categories).
+        Includes data filtered by both run_id OR lot_id.
+        Enriches data with unit and data_type from TagMetadataCache.
+        Smart mapping: Vector unit maps for Metrics, Scalar units for others.
+        """
+        from sqlalchemy import or_
+        from app.models import TsTelemetry, TsStatus, TsAlarms, TsEvents, TsMeasurements, TsMetrics, ProductionRun
+        from app.services.tag_metadata_cache import TagMetadataCache
+        
+        # 0. Fetch the run to get lot_id
+        run_res = await db.execute(select(ProductionRun).where(ProductionRun.run_id == run_id))
+        run = run_res.scalar_one_or_none()
+        if not run:
+            return None
+            
+        lot_id = run.lot_id
+
+        # 1. Get Tag Metadata Cache (Singleton)
+        tag_cache_svc = TagMetadataCache.get_instance()
+        tag_meta_cache = await tag_cache_svc.get_all_meta(db)
+
+        # Helper to execute and format
+        async def fetch_category(model):
+            stmt = select(model)
+            # Apply expanded filter: (run_id OR lot_id)
+            filter_cond = or_(model.run_id == run_id)
+            if lot_id:
+                filter_cond = or_(model.run_id == run_id, model.lot_id == lot_id)
+                
+            stmt = stmt.where(filter_cond).order_by(model.time.asc())
+            res = await db.execute(stmt)
+            
+            records = []
+            for row in res.scalars().all():
+                d = {c.name: getattr(row, c.name) for c in row.__table__.columns}
+                
+                # Enrich with metadata from central cache
+                meta = tag_meta_cache.get(row.tag_id, {})
+                d["display_name"] = meta.get("display_name", f"Tag {row.tag_id}")
+                
+                # 2. Category-Specific Semantic Enrichment
+                if model == TsMetrics:
+                    # Metrics: unit corresponds to keys in 'values' JSON
+                    fmap = meta.get("field_map", {})
+                    val_json = d.get("values", {})
+                    if isinstance(val_json, dict):
+                        d["unit"] = {k: fmap.get(k, {}).get("unit") for k in val_json.keys()}
+                        d["data_type"] = {k: fmap.get(k, {}).get("data_type", "float") for k in val_json.keys()}
+                    else:
+                        d["unit"] = None
+                        d["data_type"] = "json"
+                else:
+                    # Others (Telemetry, Status, etc.): scalar unit describes primary data column
+                    d["unit"] = meta.get("unit")
+                    d["data_type"] = meta.get("data_type", "float")
+                
+                records.append(d)
+                
+            return records
+
+        # Fetch All Categories
+        return {
+            "telemetry": await fetch_category(TsTelemetry),
+            "status": await fetch_category(TsStatus),
+            "alarms": await fetch_category(TsAlarms),
+            "events": await fetch_category(TsEvents),
+            "measurements": await fetch_category(TsMeasurements),
+            "metrics": await fetch_category(TsMetrics)
+        }

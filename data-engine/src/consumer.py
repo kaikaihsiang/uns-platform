@@ -88,7 +88,7 @@ class MQTTConsumer:
             logger.info("Disconnected from MQTT broker")
 
     def _on_message(self, client, topic, payload, qos, properties):
-        print(f"RAW_MQTT_MSG: topic={topic}")
+        logger.info("RAW_MQTT_MSG: topic=%s", topic)
         """收到訊息，交給 Pipeline 處理。"""
         self._message_count += 1
         receive_time = datetime.now(timezone.utc)

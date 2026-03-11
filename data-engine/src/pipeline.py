@@ -190,6 +190,26 @@ class Pipeline:
         self._total_passthrough = 0
         self._total_no_schema = 0
 
+    def _get_context(self, asset_path: str) -> Optional[dict]:
+        """
+        嘗試從當前路徑或父路徑獲取 Active Run Context (Up-leveling)。
+        """
+        if not self._context_cache:
+            return None
+        
+        # 1. 精準匹配
+        ctx = self._context_cache.get_active_run(asset_path)
+        if ctx: return ctx
+        
+        # 2. 向上查找一層 (例如從 .../Status 向上到設備節點)
+        parts = asset_path.split("/")
+        if len(parts) > 1:
+            parent_path = "/".join(parts[:-1])
+            ctx = self._context_cache.get_active_run(parent_path)
+            if ctx: return ctx
+            
+        return None
+
     def process(self, topic: str, payload_bytes: bytes, receive_time: Optional[datetime] = None):
         if receive_time is None:
             receive_time = datetime.now(timezone.utc)
@@ -251,11 +271,11 @@ class Pipeline:
                 tag_id, asset_path = self._tag_lookup.get_tag_id(topic=topic, field_name=ev.tag_suffix, unit=ev.unit, data_type=ev.field_type, schema_category=schema_category)
                 if tag_id is None: continue
                 if not self._deadband.should_write(tag_id, ev.value if ev.value is not None else ev.value_text, ev.deadband): continue
-                run_id, lot_id = None, None
-                if self._context_cache:
-                    ctx = self._context_cache.get_active_run(asset_path)
-                    run_id = ctx['run_id'] if ctx else None
-                    lot_id = ctx['lot_id'] if ctx else None
+                
+                ctx = self._get_context(asset_path)
+                run_id = ctx['run_id'] if ctx else None
+                lot_id = ctx['lot_id'] if ctx else None
+                
                 if self._db_writer:
                     self._db_writer.add_telemetry(TelemetryRecord(time=ev.timestamp, tag_id=tag_id, value=ev.value, value_text=ev.value_text, value_json=ev.value_json, quality='good', run_id=run_id, lot_id=lot_id))
             self.flush()
@@ -277,11 +297,9 @@ class Pipeline:
                 self._total_skipped += 1
                 return
             
-            run_id, lot_id = None, None
-            if self._context_cache:
-                ctx = self._context_cache.get_active_run(asset_path)
-                run_id = ctx['run_id'] if ctx else None
-                lot_id = ctx['lot_id'] if ctx else None
+            ctx = self._get_context(asset_path)
+            run_id = ctx['run_id'] if ctx else None
+            lot_id = ctx['lot_id'] if ctx else None
 
             target_kwargs, details = {}, {}
             for ev in extracted_values:
@@ -330,24 +348,28 @@ class Pipeline:
         final_sub = sub_code or (discovered["sub_code"] if discovered else None)
         metadata = discovered.get("metadata", {}) if discovered else {}
 
+        # 優先從 Payload (target_kwargs) 提取 lot_id/run_id，若無則使用系統上下文
+        effective_lot_id = _safe_str(target_kwargs.get("lot_id")) if "lot_id" in target_kwargs else lot_id
+        effective_run_id = target_kwargs.get("run_id") if "run_id" in target_kwargs else run_id
+
         if schema_category == "status":
-            return StatusRecord(time=receive_time, tag_id=tag_id, state_code=main_code or "STATE-CODE-UNKNOWN", sub_state_code=final_sub, code_category=final_cat or "equipment_state", mode=target_kwargs.get("mode"), run_id=run_id, lot_id=lot_id, details=details if details else None)
+            return StatusRecord(time=receive_time, tag_id=tag_id, state_code=main_code or "STATE-CODE-UNKNOWN", sub_state_code=final_sub, code_category=final_cat or "equipment_state", mode=target_kwargs.get("mode"), run_id=effective_run_id, lot_id=effective_lot_id, details=details if details else None)
         elif schema_category == "alarm":
             alarm_id = target_kwargs.get("alarm_id") or details.get("alarm_id")
             if not alarm_id:
                 alarm_id = _generate_synthetic_id("ALM", f"{tag_id}-{main_code}-{receive_time.isoformat()}")
-            return AlarmRecord(time=receive_time, tag_id=tag_id, alarm_id=alarm_id, alarm_code=main_code or "ALM-CODE-UNKNOWN", sub_alarm_code=final_sub, code_category=final_cat or "alarm_code", severity=_safe_str(target_kwargs.get("severity"), metadata.get("severity", "warning")), message=_safe_str(target_kwargs.get("message")), alarm_status=_safe_str(target_kwargs.get("alarm_status")), value=_safe_float(target_kwargs.get("value")), threshold=_safe_float(target_kwargs.get("threshold")), run_id=run_id, lot_id=lot_id, details=details if details else None)
+            return AlarmRecord(time=receive_time, tag_id=tag_id, alarm_id=alarm_id, alarm_code=main_code or "ALM-CODE-UNKNOWN", sub_alarm_code=final_sub, code_category=final_cat or "alarm_code", severity=_safe_str(target_kwargs.get("severity"), metadata.get("severity", "warning")), message=_safe_str(target_kwargs.get("message")), alarm_status=_safe_str(target_kwargs.get("alarm_status")), value=_safe_float(target_kwargs.get("value")), threshold=_safe_float(target_kwargs.get("threshold")), run_id=effective_run_id, lot_id=effective_lot_id, details=details if details else None)
         elif schema_category == "event":
             trigger = metadata.get("lifecycle_trigger")
             if trigger: self._dispatch_mes_event(trigger, target_kwargs, details, asset_path)
             event_id = target_kwargs.get("event_id") or details.get("event_id")
             if not event_id:
                 event_id = _generate_synthetic_id("EVT", f"{tag_id}-{main_code}-{receive_time.isoformat()}")
-            return EventRecord(time=receive_time, tag_id=tag_id, event_id=event_id, event_code=main_code or "EVENT-CODE-UNKNOWN", sub_event_code=final_sub, code_category=final_cat or "equipment_state", result=_safe_str(target_kwargs.get("result")), run_id=run_id, lot_id=_safe_str(target_kwargs.get("lot_id")) if "lot_id" in target_kwargs else lot_id, details=details if details else None)
+            return EventRecord(time=receive_time, tag_id=tag_id, event_id=event_id, event_code=main_code or "EVENT-CODE-UNKNOWN", sub_event_code=final_sub, code_category=final_cat or "equipment_state", result=_safe_str(target_kwargs.get("result")), run_id=effective_run_id, lot_id=effective_lot_id, details=details if details else None)
         elif schema_category == "measurement":
-            return MeasurementRecord(time=receive_time, tag_id=tag_id, value=_safe_float(target_kwargs.get("value"), 0.0), spec_upper=_safe_float(target_kwargs.get("spec_upper")), spec_lower=_safe_float(target_kwargs.get("spec_lower")), target_value=_safe_float(target_kwargs.get("target_value")), result=_safe_str(target_kwargs.get("result")), run_id=run_id, lot_id=_safe_str(target_kwargs.get("lot_id")) if "lot_id" in target_kwargs else lot_id, step_id=_safe_str(target_kwargs.get("step_id")), sample_id=_safe_str(target_kwargs.get("sample_id") or target_kwargs.get("panel_id")), sample_position=_safe_str(target_kwargs.get("sample_position")), inspector=_safe_str(target_kwargs.get("inspector")), context=None, details=details if details else None)
+            return MeasurementRecord(time=receive_time, tag_id=tag_id, value=_safe_float(target_kwargs.get("value"), 0.0), spec_upper=_safe_float(target_kwargs.get("spec_upper")), spec_lower=_safe_float(target_kwargs.get("spec_lower")), target_value=_safe_float(target_kwargs.get("target_value")), result=_safe_str(target_kwargs.get("result")), run_id=effective_run_id, lot_id=effective_lot_id, step_id=_safe_str(target_kwargs.get("step_id")), sample_id=_safe_str(target_kwargs.get("sample_id") or target_kwargs.get("panel_id")), sample_position=_safe_str(target_kwargs.get("sample_position")), inspector=_safe_str(target_kwargs.get("inspector")), context=None, details=details if details else None)
         elif schema_category == "metrics":
-            return MetricsRecord(time=receive_time, tag_id=tag_id, metric_category=final_cat or "metric_definition", metric_code=main_code or "METRIC-CODE-UNKNOWN", sub_metric_code=final_sub, period=_safe_str(target_kwargs.get("period")), values=target_kwargs.get("values") or metrics_values or {}, context=None, details=details if details else None)
+            return MetricsRecord(time=receive_time, tag_id=tag_id, metric_category=final_cat or "metric_definition", metric_code=main_code or "METRIC-CODE-UNKNOWN", sub_metric_code=final_sub, period=_safe_str(target_kwargs.get("period")), values=target_kwargs.get("values") or metrics_values or {}, run_id=effective_run_id, lot_id=effective_lot_id, context=None, details=details if details else None)
 
     def _dispatch_mes_event(self, trigger_type: str, target_kwargs: dict, details: dict, asset_path: str):
         logger.info(f"Dispatching Production Lifecycle Trigger: {trigger_type} for path {asset_path}")

@@ -20,8 +20,6 @@ logger = logging.getLogger("uns.db_writer")
 
 
 class TelemetryRecord:
-# ... (skipping unchanged Record classes for brevity in this thought, but I will include them in the real tool call if needed or just replace the DBWriter class)
-
     """ts_telemetry 寫入記錄。"""
 
     __slots__ = ("time", "tag_id", "value", "value_text", "value_json", "quality", "run_id", "lot_id")
@@ -167,12 +165,13 @@ class MeasurementRecord:
 
 class MetricsRecord:
     """ts_metrics 寫入記錄。"""
-    __slots__ = ("time", "tag_id", "metric_category", "metric_code", "sub_metric_code", "period", "values", "context", "details")
+    __slots__ = ("time", "tag_id", "metric_category", "metric_code", "sub_metric_code", "period", "values", "run_id", "lot_id", "context", "details")
 
     def __init__(self, time: datetime, tag_id: int, 
                  metric_category: str, metric_code: str, sub_metric_code: Optional[str] = None,
                  period: Optional[str] = None,
                  values: dict = None,
+                 run_id: Optional[int] = None, lot_id: Optional[str] = None,
                  context: Optional[dict] = None,
                  details: Optional[object] = None):
         self.time = time
@@ -182,6 +181,8 @@ class MetricsRecord:
         self.sub_metric_code = sub_metric_code
         self.period = period
         self.values = values or {}
+        self.run_id = run_id
+        self.lot_id = lot_id
         self.context = context
         self.details = details
 
@@ -407,9 +408,9 @@ class DBWriter:
                 cur = conn.cursor()
                 execute_values(
                     cur,
-                    """INSERT INTO ts_metrics (time, tag_id, metric_category, metric_code, sub_metric_code, period, values, context, details)
+                    """INSERT INTO ts_metrics (time, tag_id, metric_category, metric_code, sub_metric_code, period, values, run_id, lot_id, context, details)
                        VALUES %s ON CONFLICT DO NOTHING""",
-                    [(r.time, r.tag_id, r.metric_category, r.metric_code, r.sub_metric_code, r.period, Json(r.values), Json(r.context) if r.context else None, Json(r.details) if r.details else None) for r in records],
+                    [(r.time, r.tag_id, r.metric_category, r.metric_code, r.sub_metric_code, r.period, Json(r.values), r.run_id, r.lot_id, Json(r.context) if r.context else None, Json(r.details) if r.details else None) for r in records],
                     page_size=500,
                 )
                 conn.commit()

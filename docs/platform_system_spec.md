@@ -1,8 +1,8 @@
 # UNS Namespace Data Platform — 系統規格書
 
 > **文件性質**：系統設計概念、資料模型規格、Edge Cases、設計決策紀錄
-> **文件版本**：v0.1 (Draft)
-> **最後更新**：2026-03-02
+> **文件版本**：v0.2 (Finalized for MVP)
+> **最後更新**：2026-03-11
 
 ---
 
@@ -23,7 +23,8 @@
 13. [Event Topic 設計規範](#13-event-topic-設計規範)
 14. [AI/LLM 策略與定位](#14-aillm-策略與定位)
 15. [MCP Server 設計](#15-mcp-server-設計)
-16. [術語表](#16-術語表)
+16. [DevOps 與自動化測試網](#16-devops-與自動化測試網)
+17. [術語表](#17-術語表)
 
 ---
 
@@ -714,6 +715,46 @@ CREATE TABLE ts_measurements (
 4.  **即時生效 (Activation)**：
     - 綁定完成後，Data Engine 透過定期刷新（或通知機制）載入新映射。
     - 下一筆訊息進來時，Data Engine 識別到 `schema_id`，立即啟動欄位提取與資料寫入 `ts_telemetry`。
+
+### 5.11 語義強化與中繼資料查詢邏輯 (Semantic Enrichment & Metadata Lookup)
+
+為了確保 API 回傳的時序資料具備完整的工業語義（單位、資料型態、顯示名稱），系統實作了自動化的中繼資料查詢與強化機制。
+
+#### 5.11.1 查詢路徑與優先序 (Lookup Flow)
+
+當系統需要解析一個 Tag 的語義時，遵循以下路徑：
+
+1.  **Tag 基礎資訊載入**：從 `tags` 表取得 `display_name`, `category`, `unit`, `data_type` 作為底稿。
+2.  **Schema 關聯追蹤**：透過 `tag_source_mapping` 找到對應的 `mqtt_topic` (即 `full_path`)，進而定位到 `namespace_nodes` 及其關聯的 `uns_payload_schemas`。
+3.  **智能欄位匹配 (Smart Matching)**：
+    - **優先級 A (Exact Match)**：尋找 Schema 中 `name` 完全匹配 `Tag.data_point` 的欄位定義。
+    - **優先級 B (Category-Primary Match)**：若 A 失敗，則根據資料類別 (Category) 的核心目標欄位 (Primary Target Column) 進行反向匹配。
+        - Telemetry/Measurement → `target_column: 'value'`
+        - Status → `target_column: 'state_code'`
+        - Alarm → `target_column: 'alarm_code'`
+        - Event → `target_column: 'event_code'`
+        - Metrics → `target_column: 'values'`
+4.  **屬性覆蓋 (Merge & Override)**：
+    - 若 Schema 中有定義該欄位的 `unit` 或 `type`，則**覆蓋** Tag 表的預設值。
+    - 確保「工業契約 (Schema)」的權威性高於「系統預設 (Master Data)」。
+
+#### 5.11.2 複合式資料處理 (Composite Data Handling)
+
+針對 `TsMetrics` 或包含多指標的 JSON 結構，系統採取 **Vector-Mapping** 策略：
+
+- **單一數值 (Scalar)**：`unit` 回傳為單一字串（例如 `"mm"`）。
+- **複合指標 (Vector/JSON)**：
+    - 系統會比對 JSON 中的 Key 值與 Schema 欄位名稱。
+    - **`unit`**：回傳為字典格式，例如 `{"oee": "%", "perf": "%", "quality": "%"}`。
+    - **`data_type`**：同步回傳為字典，標示每個子指標的型態。
+- **優點**：前端 Dashboard 可以直接根據這個映射字典，精確地呈現每一個子指標的意義與單位。
+
+#### 5.11.3 管理機制：TagMetadataCache
+
+為了維持高效能並與 `MasterDataCache` 的實作架構統一，後端導入了 `TagMetadataCache` 單例：
+- **全域緩存**：所有 Tag 與 Schema 的對應關係預載於記憶體。
+- **Read-Through 刷新**：每 5 分鐘自動刷新，或在 Schema 變更時透過 API 觸發手動刷新。
+- **架構一致性**：與 Data Engine 的快取機制採用相同的 `refresh_if_needed()` 與單例存取模式。
 
 ---
 
@@ -1871,7 +1912,34 @@ Phase 1（PoC）只做 3 個 Tools：
 
 ---
 
-## 16. 術語表
+## 16. DevOps 與自動化測試網
+
+為了確保工廠級軟體的穩定性，平台建立了具備「工業真實感」的自動化測試網與 CI/CD 流程。
+
+### 16.1 測試策略：資產回收再利用
+我們不採取純理論測試，而是利用模擬器與 Seeding 腳本建立測試環境：
+*   **模擬驅動**：利用 `smart_factory_sim.py` 作為 Pipeline 的資料輸入源。
+*   **契約優先**：優先驗證 API 與 Pipeline 的 Data Contract（如 JSONPath 提取與溢位彙整）。
+
+### 16.2 資料庫隔離與種植 (Isolation & Seeding)
+*   **獨立資料庫**：所有測試均在 `uns_test` 資料庫執行，不影響生產或開發庫。
+*   **自動初始化**：CI 流程自動執行 `docker/init-db/*.sql`，確保 Schema 100% 同步。
+*   **ISA-95 Seeding**：每次測試前，自動注入 `TaiwanPrecision/Taoyuan/SMT_Line_1` 的基礎樹狀結構，確保測試案例擁有具備現實感的資產路徑。
+
+### 16.3 CI/CD 工作流 (GitHub Actions)
+平台配置了四層自動化驗證 Job：
+1.  **`lint`**：使用 `ruff` 進行代碼品質掃描（排除 `archive/`）。
+2.  **`backend-tests`**：驗證 FastAPI API 邏輯、資料庫 CRUD 與 Live Migration。
+3.  **`data-engine-tests`**：驗證 Data Engine 的解碼、萃取與溢位分流機制。
+4.  **`frontend-tests`**：使用 `vitest` 驗證前端 Zustand Store 的狀態變遷。
+
+### 16.4 健壯性守則 (Robustness Mandates)
+*   **全綠燈原則**：任何 Job 失敗（含 Log 中的 FATAL 錯誤）均視為部署阻斷。
+*   **單一溢位出口**：業務資料溢位僅限進入 `details` 欄位，`context` 欄位嚴禁手動寫入。
+
+---
+
+## 17. 術語表
 
 | 術語 | 定義 |
 |---|---|

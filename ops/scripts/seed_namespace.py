@@ -87,7 +87,7 @@ def main():
         name="SMT_Mounter_Telemetry", category="telemetry", decoder="json", timestamp_field="$._meta.timestamp", store_raw=True,
         fields=[
             {"name": "temp", "path": "$.data.values.temp", "type": "float", "unit": "°C", "extract": True, "persist": True, "deadband": 0.1, "array_mode": "single"},
-            {"name": "press", "path": "$.data.values.press", "type": "float", "unit": "kPa", "extract": True, "persist": True, "deadband": 0.05, "array_mode": "single"},
+            {"name": "press", "path": "$.data.values.press", "type": "float", "unit": "kPa", "extract": True, "persist": True, "deadband": 0.01, "array_mode": "single"},
             {"name": "vib", "path": "$.data.values.vib", "type": "float", "unit": "mm/s", "extract": True, "persist": True, "deadband": 0.01, "array_mode": "single"}
         ]
     )
@@ -151,45 +151,48 @@ def main():
             {"name": "avail", "path": "$.data.values.avail", "type": "float", "unit": "%", "extract": True, "persist": True, "deadband": None, "array_mode": "single"},
             {"name": "perf", "path": "$.data.values.perf", "type": "float", "unit": "%", "extract": True, "persist": True, "deadband": None, "array_mode": "single"},
             {"name": "qual", "path": "$.data.values.qual", "type": "float", "unit": "%", "extract": True, "persist": True, "deadband": None, "array_mode": "single"}
+            # {"name": "oee_unit", "path": "$.data.units.oee", "type": "string", "extract": True, "persist": True, "array_mode": "single", "target_column": "details"}, 
+            # {"name": "avail_unit", "path": "$.data.units.avail", "type": "string", "extract": True, "persist": True, "array_mode": "single", "target_column": "details"}, 
+            # {"name": "qual_unit", "path": "$.data.units.qual", "type": "string", "extract": True, "persist": True, "array_mode": "single", "target_column": "details"}
         ]
     )
     print("✓ Schema Equipment_OEE_Metrics (metrics) created.")
 
     # 7. Maintenance Schema
     schema_maintenance = create_schema(
-        name="Maintenance_Event", category="maintenance", decoder="json", timestamp_field="$._meta.timestamp", store_raw=True,
+        name="Maintenance_Event", category="event", decoder="json", timestamp_field="$._meta.timestamp", store_raw=True,
         fields=[
             {"name": "maintenance_id", "path": "$.data.maintenance_id", "type": "string", "extract": True, "persist": True, "target_column": "event_id"},
             {"name": "maintenance_type", "path": "$.data.type", "type": "string", "extract": True, "persist": True, "target_column": "event_code"},
-            {"name": "status", "path": "$.data.status", "type": "string", "extract": True, "persist": True, "target_column": "status"},
-            {"name": "message", "path": "$.data.message", "type": "string", "extract": True, "persist": True, "target_column": "message"},
+            {"name": "status", "path": "$.data.status", "type": "string", "extract": True, "persist": True, "target_column": "result"},
+            {"name": "message", "path": "$.data.message", "type": "string", "extract": True, "persist": True, "target_column": "details"},
         ]
     )
-    print("✓ Schema Maintenance_Event (maintenance) created.")
+    print("✓ Schema Maintenance_Event (event) created.")
 
     # 8. Quality Schema
     schema_quality = create_schema(
-        name="Quality_Sample", category="quality", decoder="json", timestamp_field="$._meta.timestamp", store_raw=True,
+        name="Quality_Sample", category="measurement", decoder="json", timestamp_field="$._meta.timestamp", store_raw=True,
         fields=[
             {"name": "sample_id", "path": "$.data.sample_id", "type": "string", "extract": True, "persist": True, "target_column": "sample_id"},
             {"name": "lot_id", "path": "$.data.lot_id", "type": "string", "extract": True, "persist": True, "target_column": "lot_id"},
-            {"name": "parameter_name", "path": "$.data.parameter", "type": "string", "extract": True, "persist": True, "target_column": "parameter_name"},
+            {"name": "parameter_name", "path": "$.data.parameter", "type": "string", "extract": True, "persist": True, "target_column": "details"},
             {"name": "value", "path": "$.data.value", "type": "float", "extract": True, "persist": True, "target_column": "value"},
             {"name": "is_pass", "path": "$.data.is_pass", "type": "boolean", "extract": True, "persist": True, "target_column": "result"},
         ]
     )
-    print("✓ Schema Quality_Sample (quality) created.")
+    print("✓ Schema Quality_Sample (measurement) created.")
 
     # 9. Recipe Schema
     schema_recipe = create_schema(
-        name="Recipe_Event", category="recipe", decoder="json", timestamp_field="$._meta.timestamp", store_raw=True,
+        name="Recipe_Event", category="event", decoder="json", timestamp_field="$._meta.timestamp", store_raw=True,
         fields=[
-            {"name": "recipe_id", "path": "$.data.recipe_id", "type": "string", "extract": True, "persist": True, "target_column": "recipe_id"},
+            {"name": "recipe_id", "path": "$.data.recipe_id", "type": "string", "extract": True, "persist": True, "target_column": "event_id"},
             {"name": "event", "path": "$.data.event", "type": "string", "extract": True, "persist": True, "target_column": "event_code"},
-            {"name": "source", "path": "$.data.source", "type": "string", "extract": True, "persist": True, "target_column": "message"},
+            {"name": "source", "path": "$.data.source", "type": "string", "extract": True, "persist": True, "target_column": "details"},
         ]
     )
-    print("✓ Schema Recipe_Event (recipe) created.")
+    print("✓ Schema Recipe_Event (event) created.")
 
 
     # --- 2. Create Hierarchy ---
