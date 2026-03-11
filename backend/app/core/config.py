@@ -14,6 +14,7 @@ class Settings(BaseSettings):
 
     # --- Database ---
     database_url: str = "postgresql+asyncpg://uns_admin:uns_dev_password@localhost:5432/uns_timeseries"
+    test_database_url: str = "postgresql+asyncpg://uns_admin:uns_dev_password@localhost:5432/uns_test"
 
     # --- MQTT / EMQX ---
     mqtt_broker_host: str = "localhost"

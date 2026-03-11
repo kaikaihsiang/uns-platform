@@ -1,0 +1,21 @@
+-- =============================================================================
+-- Create Test Database (run as superuser, e.g., postgres)
+-- =============================================================================
+-- This script creates the isolated 'uns_test' database.
+-- It should be run once before setting up the schema.
+--
+-- How to run from your local machine using Docker:
+-- 1. Make sure your TimescaleDB container is running (e.g., 'uns-timescaledb').
+-- 2. Execute the command below:
+--
+-- docker exec -i uns-timescaledb psql -U postgres -d postgres < ops/create_test_db.sql
+--
+-- Note: If the 'uns_test' database already exists, this will raise an error.
+-- This is often desired behavior to prevent accidental re-creation.
+-- To make it idempotent, you can wrap it in a shell command:
+-- if ! docker exec uns-timescaledb psql -U postgres -d postgres -lqt | cut -d \| -f 1 | grep -qw uns_test; then
+--   docker exec -i uns-timescaledb psql -U postgres -d postgres < ops/create_test_db.sql
+-- fi
+-- =============================================================================
+
+CREATE DATABASE uns_test;

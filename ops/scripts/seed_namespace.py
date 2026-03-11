@@ -152,16 +152,52 @@ def main():
     )
     print(f"✓ Schema Equipment_OEE_Metrics (metrics) created.")
 
+    # 7. Maintenance Schema
+    schema_maintenance = create_schema(
+        name="Maintenance_Event", category="maintenance", decoder="json", timestamp_field="$._meta.timestamp", store_raw=True,
+        fields=[
+            {"name": "maintenance_id", "path": "$.data.maintenance_id", "type": "string", "extract": True, "persist": True, "target_column": "event_id"},
+            {"name": "maintenance_type", "path": "$.data.type", "type": "string", "extract": True, "persist": True, "target_column": "event_code"},
+            {"name": "status", "path": "$.data.status", "type": "string", "extract": True, "persist": True, "target_column": "status"},
+            {"name": "message", "path": "$.data.message", "type": "string", "extract": True, "persist": True, "target_column": "message"},
+        ]
+    )
+    print("✓ Schema Maintenance_Event (maintenance) created.")
+
+    # 8. Quality Schema
+    schema_quality = create_schema(
+        name="Quality_Sample", category="quality", decoder="json", timestamp_field="$._meta.timestamp", store_raw=True,
+        fields=[
+            {"name": "sample_id", "path": "$.data.sample_id", "type": "string", "extract": True, "persist": True, "target_column": "sample_id"},
+            {"name": "lot_id", "path": "$.data.lot_id", "type": "string", "extract": True, "persist": True, "target_column": "lot_id"},
+            {"name": "parameter_name", "path": "$.data.parameter", "type": "string", "extract": True, "persist": True, "target_column": "parameter_name"},
+            {"name": "value", "path": "$.data.value", "type": "float", "extract": True, "persist": True, "target_column": "value"},
+            {"name": "is_pass", "path": "$.data.is_pass", "type": "boolean", "extract": True, "persist": True, "target_column": "result"},
+        ]
+    )
+    print("✓ Schema Quality_Sample (quality) created.")
+
+    # 9. Recipe Schema
+    schema_recipe = create_schema(
+        name="Recipe_Event", category="recipe", decoder="json", timestamp_field="$._meta.timestamp", store_raw=True,
+        fields=[
+            {"name": "recipe_id", "path": "$.data.recipe_id", "type": "string", "extract": True, "persist": True, "target_column": "recipe_id"},
+            {"name": "event", "path": "$.data.event", "type": "string", "extract": True, "persist": True, "target_column": "event_code"},
+            {"name": "source", "path": "$.data.source", "type": "string", "extract": True, "persist": True, "target_column": "message"},
+        ]
+    )
+    print("✓ Schema Recipe_Event (recipe) created.")
+
 
     # --- 2. Create Hierarchy ---
     print("\nCreating ISA-95 Node Hierarchy...")
     ent_id = create_node("TaiwanPrecision")
     site_id = create_node("Taoyuan", ent_id)
     area_id = create_node("SMT_Line_1", site_id)
-    
+
     # Equipment 1: Mounter
     mounter_id = create_node("SMT-Mounter-01", area_id)
-    
+
     # Equipment 2: AOI
     aoi_id = create_node("SMT-AOI-01", area_id)
 
@@ -169,22 +205,25 @@ def main():
 
     # --- 3. Create Topic Nodes ---
     print("\nCreating Topic Nodes and Binding Schemas...")
-    
+
     # Line-Level Topics (Shared context)
     create_node("Events", area_id, "topic", schema_id=schema_event)
-    
+    create_node("QualitySamples", area_id, "topic", schema_id=schema_quality)
+    create_node("RecipeEvents", area_id, "topic", schema_id=schema_recipe)
+
     # Mounter Topics
     create_node("Telemetry", mounter_id, "topic", schema_id=schema_telemetry)
     create_node("Status", mounter_id, "topic", schema_id=schema_status)
     create_node("Alarms", mounter_id, "topic", schema_id=schema_alarm)
     create_node("Metrics", mounter_id, "topic", schema_id=schema_metrics)
     create_node("Events", mounter_id, "topic", schema_id=schema_event)
+    create_node("Maintenance", mounter_id, "topic", schema_id=schema_maintenance)
 
     # AOI Topics
     create_node("Measurements", aoi_id, "topic", schema_id=schema_measurement)
     create_node("Status", aoi_id, "topic", schema_id=schema_status)
 
-    print("✓ All 6 Data Categories are successfully mapped to professional namespace topics.")
+    print("✓ All 9 Data Categories are successfully mapped to professional namespace topics.")
 
     print("\n🟢 Enterprise Namespace Seed Completed Successfully!")
 
