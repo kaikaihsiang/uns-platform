@@ -216,14 +216,23 @@ class DBWriter:
         self._lock = threading.Lock()
         self._last_flush = time.monotonic()
 
+        # 活躍 Tag 追蹤 (用於批次更新 last_data_at)
+        self._seen_tags: set[int] = set()
+
         # 統計
         self._total_telemetry_written = 0
         self._total_raw_written = 0
         self._total_errors = 0
 
+    def _mark_tag_seen(self, tag_id: int):
+        """記錄活躍的 Tag ID。"""
+        if tag_id:
+            self._seen_tags.add(tag_id)
+
     def add_telemetry(self, record: TelemetryRecord):
         """新增一筆 telemetry 記錄到 buffer。"""
         with self._lock:
+            self._mark_tag_seen(record.tag_id)
             self._telemetry_buffer.append(record)
             if len(self._telemetry_buffer) >= self._batch_size:
                 self._flush_telemetry()
@@ -231,6 +240,7 @@ class DBWriter:
     def add_status(self, record: StatusRecord):
         """新增一筆 status 記錄到 buffer。"""
         with self._lock:
+            self._mark_tag_seen(record.tag_id)
             self._status_buffer.append(record)
             if len(self._status_buffer) >= self._batch_size:
                 self._flush_status()
@@ -238,6 +248,7 @@ class DBWriter:
     def add_alarm(self, record: AlarmRecord):
         """新增一筆 alarm 記錄到 buffer。"""
         with self._lock:
+            self._mark_tag_seen(record.tag_id)
             self._alarm_buffer.append(record)
             if len(self._alarm_buffer) >= self._batch_size:
                 self._flush_alarm()
@@ -245,6 +256,7 @@ class DBWriter:
     def add_event(self, record: EventRecord):
         """新增一筆 event 記錄到 buffer。"""
         with self._lock:
+            self._mark_tag_seen(record.tag_id)
             self._event_buffer.append(record)
             if len(self._event_buffer) >= self._batch_size:
                 self._flush_event()
@@ -252,6 +264,7 @@ class DBWriter:
     def add_metrics(self, record: MetricsRecord):
         """新增一筆 metrics 記錄到 buffer。"""
         with self._lock:
+            self._mark_tag_seen(record.tag_id)
             self._metric_buffer.append(record)
             if len(self._metric_buffer) >= self._batch_size:
                 self._flush_metrics()
@@ -259,6 +272,7 @@ class DBWriter:
     def add_measurement(self, record: MeasurementRecord):
         """新增一筆 measurement 記錄到 buffer。"""
         with self._lock:
+            self._mark_tag_seen(record.tag_id)
             self._meas_buffer.append(record)
             if len(self._meas_buffer) >= self._batch_size:
                 self._flush_measurement()
@@ -289,7 +303,31 @@ class DBWriter:
             self._flush_metrics()
             self._flush_measurement()
             self._flush_raw()
+            self._flush_last_data_at()
             self._last_flush = time.monotonic()
+
+    def _flush_last_data_at(self):
+        """批次更新活躍 Tag 的最後見到時間。"""
+        if not self._seen_tags:
+            return
+
+        tag_ids = list(self._seen_tags)
+        self._seen_tags = set()
+
+        try:
+            with self._db_pool.connection() as conn:
+                cur = conn.cursor()
+                # 採用 IN 子句做批次更新，效率極高
+                cur.execute(
+                    "UPDATE tags SET last_data_at = NOW() WHERE tag_id IN %s",
+                    (tuple(tag_ids),)
+                )
+                conn.commit()
+                cur.close()
+                logger.debug("Updated last_data_at for %d tags", len(tag_ids))
+        except Exception as e:
+            logger.error("Failed to update tags last_data_at: %s", e)
+            self._total_errors += 1
 
     def _flush_telemetry(self):
         """批次寫入 ts_telemetry。"""

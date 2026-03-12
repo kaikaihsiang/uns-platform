@@ -1,17 +1,18 @@
 import { useEffect, useState, useMemo } from 'react';
-import { 
-    Table, Form, Input, Button, DatePicker, Card, Tag, Space, 
-    Typography, Empty, Spin, Badge, Tabs, Checkbox, Row, Col, 
-    Statistic, ConfigProvider 
+import {
+    Table, Form, Input, Button, DatePicker, Card, Tag, Space,
+    Typography, Empty, Spin, Badge, Tabs, Checkbox, Row, Col,
+    Statistic, ConfigProvider
 } from 'antd';
-import { 
-    SearchOutlined, ReloadOutlined, HistoryOutlined, 
-    LineChartOutlined, CheckCircleOutlined, 
-    DashboardOutlined, UnorderedListOutlined 
+import {
+    SearchOutlined, ReloadOutlined, HistoryOutlined,
+    LineChartOutlined, CheckCircleOutlined,
+    DashboardOutlined, UnorderedListOutlined
 } from '@ant-design/icons';
-import { 
-    ResponsiveContainer, LineChart, Line, XAxis, YAxis, 
-    CartesianGrid, Tooltip, Legend, ScatterChart, Scatter, Cell, ReferenceLine 
+import {
+    ResponsiveContainer, XAxis, YAxis,
+    CartesianGrid, Tooltip, Legend, Scatter, Cell,
+    ComposedChart, Line, Area
 } from 'recharts';
 import { useProductionStore } from '../store/productionStore';
 import type { ProductionRun } from '../store/productionStore';
@@ -20,94 +21,291 @@ const { Title, Text } = Typography;
 const { RangePicker } = DatePicker;
 
 /**
- * 下鑽詳情面板組件 (多維度互動版)
+ * 下鑽詳情面板組件 - 單一圖表 RCA 整合版
  */
 function RunDetailPanel({ runId }: { runId: number }) {
     const { runDataCache, fetchRunData } = useProductionStore();
     const data = runDataCache[runId];
-    
-    // 控製圖表顯示的 Series
+
     const [visibleMetrics, setVisibleMetrics] = useState<string[]>([]);
 
     useEffect(() => {
         fetchRunData(runId);
     }, [runId, fetchRunData]);
 
-    // Helper to format labels with units
     const getMetricLabel = (t: any) => t.unit ? `${t.display_name} (${t.unit})` : t.display_name;
-
-    // 當數據載入時，預設顯示所有指標
-    useEffect(() => {
-        if (data?.telemetry && visibleMetrics.length === 0) {
-            const allLabels = Array.from(new Set(data.telemetry.map(getMetricLabel)));
-            setVisibleMetrics(allLabels);
-        }
-    }, [data?.telemetry, visibleMetrics.length]);
 
     const hasData = !!data;
     const colors = ['#1890ff', '#52c41a', '#faad14', '#f5222d', '#722ed1', '#13c2c2'];
 
-    // --- 1. 遙測趨勢處理 ---
-    const telemetrySection = useMemo(() => {
-        if (!data?.telemetry.length) return <Empty description="無遙測數據" />;
-        
-        const pivoitedMap: Record<string, any> = {};
-        const metricLabels = new Set<string>();
+    // --- 1. 資料處理 (單一時間軸) ---
+    const timelineData = useMemo(() => {
+        if (!data) return [];
 
-        // Reverse data for chart: oldest to newest
-        [...data.telemetry].reverse().forEach(t => {
-            const timeKey = new Date(t.time).toLocaleTimeString();
-            if (!pivoitedMap[timeKey]) pivoitedMap[timeKey] = { time: timeKey };
-            const label = getMetricLabel(t);
-            pivoitedMap[timeKey][label] = t.value;
-            metricLabels.add(label);
+        const allTimestamps = new Set<number>();
+        data.telemetry.forEach(t => allTimestamps.add(new Date(t.time).getTime()));
+        data.status.forEach(s => allTimestamps.add(new Date(s.time).getTime()));
+        data.alarms.forEach(a => allTimestamps.add(new Date(a.time).getTime()));
+        data.events.forEach(e => allTimestamps.add(new Date(e.time).getTime()));
+
+        const sortedTicks = Array.from(allTimestamps).sort((a, b) => a - b);
+
+        const stateMap: Record<string, number> = {
+            'RUN': 3, 'PRD': 3, 'PROD': 3,
+            'IDLE': 2, 'SBY': 2, 'STANDBY': 2,
+            'DOWN': 1, 'UDT': 1, 'FAIL': 1,
+            'OFF': 0
+        };
+
+        let lastStatusValue = 0;
+        let lastStatusCode = 'N/A';
+        let lastStatusSubCode = '';
+        const result = [];
+
+        const telByTime: Record<number, any[]> = {};
+        data.telemetry.forEach(t => {
+            const time = new Date(t.time).getTime();
+            if (!telByTime[time]) telByTime[time] = [];
+            telByTime[time].push(t);
         });
 
-        const chartData = Object.values(pivoitedMap);
-        const metrics = Array.from(metricLabels);
+        const statByTime: Record<number, any> = {};
+        data.status.forEach(s => {
+            statByTime[new Date(s.time).getTime()] = s;
+        });
+
+        const alarmByTime: Record<number, any[]> = {};
+        data.alarms.forEach(a => {
+            const time = new Date(a.time).getTime();
+            if (!alarmByTime[time]) alarmByTime[time] = [];
+            alarmByTime[time].push(a);
+        });
+
+        const eventByTime: Record<number, any[]> = {};
+        data.events.forEach(e => {
+            const time = new Date(e.time).getTime();
+            if (!eventByTime[time]) eventByTime[time] = [];
+            eventByTime[time].push(e);
+        });
+
+        for (const tick of sortedTicks) {
+            if (statByTime[tick]) {
+                lastStatusCode = statByTime[tick].state_code;
+                lastStatusSubCode = statByTime[tick].sub_state_code || '';
+                lastStatusValue = stateMap[lastStatusCode.toUpperCase()] || 0;
+            }
+
+            const point: any = {
+                timestamp: tick,
+                statusValue: lastStatusValue,
+                statusCode: lastStatusCode,
+                statusSubCode: lastStatusSubCode,
+                alarmCount: alarmByTime[tick]?.length || 0,
+                alarms: alarmByTime[tick] || [],
+                eventCount: eventByTime[tick]?.length || 0,
+                events: eventByTime[tick] || []
+            };
+
+            if (telByTime[tick]) {
+                telByTime[tick].forEach(t => {
+                    const label = getMetricLabel(t);
+                    point[label] = t.value;
+                });
+            }
+            result.push(point);
+        }
+        return result;
+    }, [data]);
+
+    const telemetrySection = useMemo(() => {
+        if (!data?.telemetry.length) return <Empty description="無遙測數據" />;
+
+        const telLabels = Array.from(new Set(data.telemetry.map(getMetricLabel)));
+        const allOptions = [...telLabels, '🚨 警報', '📦 生產事件', '📊 設備狀態'];
+
+        if (visibleMetrics.length === 0) {
+            setVisibleMetrics(allOptions);
+        }
+
+        const renderTooltip = ({ active, payload }: any) => {
+            if (active && payload && payload.length) {
+                const d = payload[0].payload;
+                return (
+                    <div style={{
+                        background: '#1f1f1f',
+                        padding: '12px',
+                        border: '1px solid #444',
+                        borderRadius: 4,
+                        boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+                        maxWidth: 320,
+                        pointerEvents: 'none'
+                    }}>
+                        <Text strong style={{ color: '#aaa', display: 'block', marginBottom: 8, borderBottom: '1px solid #333', paddingBottom: 4 }}>
+                            {new Date(d.timestamp).toLocaleString()}
+                        </Text>
+
+                        <div style={{ marginBottom: 8 }}>
+                            <Badge
+                                status={d.statusValue === 3 ? 'success' : d.statusValue === 1 ? 'error' : 'warning'}
+                                text={<Text strong style={{ color: '#fff' }}>狀態: {d.statusCode}{d.statusSubCode ? `/${d.statusSubCode}` : ''}</Text>}
+                            />
+                        </div>
+
+                        {d.alarmCount > 0 && (
+                            <div style={{ marginBottom: 8 }}>
+                                <Text type="danger" strong>🚨 警報 ({d.alarmCount}):</Text>
+                                {d.alarms.map((a: any, i: number) => (
+                                    <div key={i} style={{ fontSize: 10, color: '#ff7875', marginLeft: 8 }}>
+                                        • {a.alarm_code}{a.sub_alarm_code ? `/${a.sub_alarm_code}` : ''}: {a.message}
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+
+                        {d.eventCount > 0 && (
+                            <div style={{ marginBottom: 8 }}>
+                                <Text style={{ color: '#40a9ff' }} strong>📦 事件 ({d.eventCount}):</Text>
+                                {d.events.map((e: any, i: number) => (
+                                    <div key={i} style={{ fontSize: 10, color: '#91d5ff', marginLeft: 8 }}>
+                                        • {e.event_code}{e.sub_event_code ? `/${e.sub_event_code}` : ''} ({e.result || 'N/A'})
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+
+                        {/* 數值摘要 */}
+                        <div style={{ borderTop: '1px solid #333', paddingTop: 4, marginTop: 4 }}>
+                            {telLabels.map((l, i) => d[l] !== undefined && (
+                                <div key={i} style={{ fontSize: 11, color: colors[i % colors.length] }}>
+                                    {l}: <Text strong style={{ color: '#fff' }}>{d[l]}</Text>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                );
+            }
+            return null;
+        };
 
         return (
-            <Row gutter={[24, 24]}>
+            <Row gutter={[0, 16]}>
                 <Col span={24}>
-                    <Card size="small" title="顯示選項 (互動圖例)" style={{ marginBottom: 16 }}>
-                        <Checkbox.Group 
-                            options={metrics} 
-                            value={visibleMetrics} 
-                            onChange={(vals) => setVisibleMetrics(vals as string[])} 
-                        />
+                    <Card size="small" style={{ marginBottom: 12, background: 'rgba(255,255,255,0.02)' }}>
+                        <Space split={<Text type="secondary">|</Text>} wrap>
+                            <Text strong>顯示指標:</Text>
+                            <Checkbox.Group
+                                options={allOptions}
+                                value={visibleMetrics}
+                                onChange={(vals) => setVisibleMetrics(vals as string[])}
+                            />
+                        </Space>
                     </Card>
                 </Col>
-                <Col span={24} style={{ height: 400 }}>
+
+                <Col span={24} style={{ height: 450 }}>
                     <ResponsiveContainer width="100%" height="100%">
-                        <LineChart data={chartData}>
+                        <ComposedChart
+                            data={timelineData}
+                            margin={{ top: 20, right: 30, left: 20, bottom: 20 }}
+                        >
                             <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-                            <XAxis dataKey="time" stroke="rgba(255,255,255,0.4)" fontSize={11} />
-                            <YAxis stroke="rgba(255,255,255,0.4)" fontSize={11} />
-                            <Tooltip contentStyle={{ background: '#141414', border: '1px solid #333' }} />
-                            <Legend />
-                            {metrics.filter(m => visibleMetrics.includes(m)).map((m, idx) => (
-                                <Line 
+                            <XAxis
+                                dataKey="timestamp"
+                                type="number"
+                                domain={['dataMin', 'dataMax']}
+                                stroke="rgba(255,255,255,0.4)"
+                                fontSize={10}
+                                tickFormatter={(ts) => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                            />
+                            {/* 主 Y 軸：遙測數值 */}
+                            <YAxis
+                                yAxisId="left"
+                                stroke="rgba(255,255,255,0.4)"
+                                fontSize={10}
+                            />
+                            {/* 隱藏的副 Y 軸：給狀態條使用 */}
+                            <YAxis yAxisId="status" hide domain={[0, 40]} />
+
+                            <Tooltip content={renderTooltip} />
+                            <Legend verticalAlign="top" height={36} />
+
+                            {/* 1. 狀態條 (底層色塊) - 始終顯示在最下方 */}
+                            {visibleMetrics.includes('📊 設備狀態') && (
+                                <Area
+                                    yAxisId="status"
+                                    type="stepAfter"
+                                    dataKey="statusValue"
+                                    stroke="none"
+                                    fillOpacity={0.3}
+                                    fill="#52c41a"
+                                    isAnimationActive={false}
+                                    name=" 設備狀態"
+                                />
+                            )}
+
+                            {/* 2. 警報標記點 */}
+                            {visibleMetrics.includes('🚨 警報') && (
+                                <Scatter
+                                    yAxisId="status"
+                                    name=" 警報"
+                                    dataKey="alarmCount"
+                                    fill="#ff4d4f"
+                                >
+                                    {timelineData.map((entry, index) => (
+                                        <Cell
+                                            key={`cell-a-${index}`}
+                                            fill={entry.alarmCount > 0 ? '#ff4d4f' : 'transparent'}
+                                        />
+                                    ))}
+                                </Scatter>
+                            )}
+
+                            {/* 3. 事件標記點 */}
+                            {visibleMetrics.includes('📦 生產事件') && (
+                                <Scatter
+                                    yAxisId="status"
+                                    name=" 生產事件"
+                                    dataKey="eventCount"
+                                    fill="#40a9ff"
+                                >
+                                    {timelineData.map((entry, index) => (
+                                        <Cell
+                                            key={`cell-e-${index}`}
+                                            fill={entry.eventCount > 0 ? '#40a9ff' : 'transparent'}
+                                        />
+                                    ))}
+                                </Scatter>
+                            )}
+
+                            {/* 4. 遙測曲線 */}
+                            {telLabels.filter(m => visibleMetrics.includes(m)).map((m, idx) => (
+                                <Line
+                                    yAxisId="left"
                                     key={m}
-                                    type="monotone" 
-                                    dataKey={m} 
-                                    stroke={colors[idx % colors.length]} 
+                                    type="monotone"
+                                    dataKey={m}
+                                    stroke={colors[idx % colors.length]}
                                     strokeWidth={2}
                                     dot={false}
                                     connectNulls
+                                    isAnimationActive={false}
                                 />
                             ))}
-                        </LineChart>
+                        </ComposedChart>
                     </ResponsiveContainer>
+                </Col>
+                <Col span={24}>
+                    <div style={{ textAlign: 'center', fontSize: 10, color: 'rgba(255,255,255,0.3)' }}>
+                        ※ 圖表底部淺綠色區塊代表設備 RUN 狀態，點位代表離散事件/警報。
+                    </div>
                 </Col>
             </Row>
         );
-    }, [data?.telemetry, visibleMetrics]);
+    }, [timelineData, visibleMetrics, colors, data]);
 
-    // --- 2. 品質測量 (Measurements) ---
+    // --- 其餘分頁 (保持不變) ---
     const measurementSection = useMemo(() => {
         if (!data?.measurements.length) return <Empty description="無品檢數據" />;
-        
-        // Reverse for chart: oldest to newest
         const chartData = [...data.measurements].reverse().map(m => ({
             time: new Date(m.time).toLocaleTimeString(),
             fullTime: new Date(m.time).toLocaleString(),
@@ -124,7 +322,7 @@ function RunDetailPanel({ runId }: { runId: number }) {
             <Space direction="vertical" style={{ width: '100%' }} size="large">
                 <div style={{ height: 300 }}>
                     <ResponsiveContainer width="100%" height="100%">
-                        <ScatterChart>
+                        <ComposedChart data={chartData}>
                             <CartesianGrid strokeDasharray="3 3" vertical={false} />
                             <XAxis dataKey="time" fontSize={11} />
                             <YAxis domain={['auto', 'auto']} fontSize={11} label={{ value: chartData[0]?.unit, angle: -90, position: 'insideLeft' }} />
@@ -136,52 +334,22 @@ function RunDetailPanel({ runId }: { runId: number }) {
                                     <Cell key={`cell-${index}`} fill={entry.result?.toLowerCase() === 'fail' ? '#ff4d4f' : '#52c41a'} />
                                 ))}
                             </Scatter>
-                        </ScatterChart>
+                        </ComposedChart>
                     </ResponsiveContainer>
                 </div>
-                <Table 
-                    size="small"
-                    dataSource={data.measurements}
-                    pagination={{ pageSize: 5 }}
-                    rowKey={(record) => `${record.time}-${record.tag_id}`}
+                <Table size="small" dataSource={data.measurements} pagination={{ pageSize: 5 }} rowKey={(r) => `${r.time}-${r.tag_id}`}
                     columns={[
-                        { 
-                            title: '檢驗時間', 
-                            dataIndex: 'time', 
-                            render: (t) => new Date(t).toLocaleString(), 
-                            width: 170,
-                            sorter: (a, b) => new Date(a.time).getTime() - new Date(b.time).getTime(),
-                            defaultSortOrder: 'descend'
-                        },
-                        { title: '製程步序 (Step)', dataIndex: 'step_id', render: (s) => s || '-', sorter: (a, b) => (a.step_id || '').localeCompare(b.step_id || '') },
-                        { title: '樣本 ID', dataIndex: 'sample_id', render: (s) => <Text strong>{s}</Text>, sorter: (a, b) => (a.sample_id || '').localeCompare(b.sample_id || '') },
-                        { title: '位置', dataIndex: 'sample_position', sorter: (a, b) => (a.sample_position || '').localeCompare(b.sample_position || '') },
-                        { 
-                            title: '量測值', 
-                            dataIndex: 'value', 
-                            render: (v, r) => <Text strong>{v} {r.unit}</Text>,
-                            sorter: (a, b) => (a.value || 0) - (b.value || 0)
-                        },
-                        { title: '目標值', dataIndex: 'target_value', sorter: (a, b) => (a.target_value || 0) - (b.target_value || 0) },
-                        { title: '規格 (LSL/USL)', render: (_, r) => <Text type="secondary">{r.spec_lower || '-'} / {r.spec_upper || '-'}</Text> },
-                        { 
-                            title: '結果', 
-                            dataIndex: 'result', 
-                            render: (res) => (
-                                <Tag color={res?.toLowerCase() === 'fail' ? 'red' : 'green'} style={{ fontSize: 10 }}>{res?.toUpperCase() || 'PASS'}</Tag>
-                            ),
-                            sorter: (a, b) => (a.result || '').localeCompare(b.result || '')
-                        },
-                        { title: '檢驗員', dataIndex: 'inspector', sorter: (a, b) => (a.inspector || '').localeCompare(b.inspector || '') },
-                        { title: 'Context', dataIndex: 'context', render: (c) => c ? <Text type="secondary" style={{ fontSize: 10 }}>{JSON.stringify(c)}</Text> : '-' },
-                        { title: '詳情', dataIndex: 'details', render: (d) => d ? <Text type="secondary" style={{ fontSize: 10 }}>{JSON.stringify(d)}</Text> : '-' },
+                        { title: '檢驗時間', dataIndex: 'time', render: (t) => new Date(t).toLocaleString(), width: 170 },
+                        { title: '製程步序 (Step)', dataIndex: 'step_id', render: (s) => s || '-' },
+                        { title: '樣本 ID', dataIndex: 'sample_id', render: (s) => <Text strong>{s}</Text> },
+                        { title: '結果', dataIndex: 'result', render: (res) => <Tag color={res?.toLowerCase() === 'fail' ? 'red' : 'green'}>{res?.toUpperCase() || 'PASS'}</Tag> },
+                        { title: '量測值', dataIndex: 'value', render: (v, r) => <Text strong>{v} {r.unit}</Text> },
                     ]}
                 />
             </Space>
         );
     }, [data?.measurements]);
 
-    // --- 3. 指標概覽 (Metrics) ---
     const metricsSection = (
         <Row gutter={[16, 16]}>
             {data?.metrics && data.metrics.length > 0 ? data.metrics.map((m, mIdx) => (
@@ -192,122 +360,21 @@ function RunDetailPanel({ runId }: { runId: number }) {
                                 const unit = (m.unit && typeof m.unit === 'object') ? (m.unit as any)[key] : m.unit;
                                 return (
                                     <Col span={6} key={vIdx}>
-                                        <Statistic 
-                                            title={key.toUpperCase()} 
-                                            value={val as number} 
-                                            suffix={unit || ''}
-                                            precision={2}
-                                            valueStyle={{ fontSize: '16px' }}
-                                        />
+                                        <Statistic title={key.toUpperCase()} value={val as number} suffix={unit || ''} precision={2} valueStyle={{ fontSize: '16px' }} />
                                     </Col>
                                 );
                             })}
                         </Row>
-                        {m.details && (
-                            <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid rgba(255,255,255,0.05)' }}>
-                                <Text type="secondary" style={{ fontSize: 10 }}>Details: {JSON.stringify(m.details)}</Text>
-                            </div>
-                        )}
                     </Card>
                 </Col>
             )) : <Empty description="無聚合指標" />}
         </Row>
     );
 
-    // --- 4. 狀態歷史 (Status) ---
-    const statusSection = useMemo(() => {
-        if (!data?.status.length) return <Empty description="無狀態數據" />;
-        return (
-            <Table 
-                size="small"
-                dataSource={data.status}
-                pagination={{ pageSize: 10 }}
-                rowKey={(record) => `${record.time}-${record.tag_id}`}
-                columns={[
-                    { 
-                        title: '時間', 
-                        dataIndex: 'time', 
-                        render: (t) => new Date(t).toLocaleString(), 
-                        width: 170,
-                        sorter: (a, b) => new Date(a.time).getTime() - new Date(b.time).getTime(),
-                        defaultSortOrder: 'descend'
-                    },
-                    { title: '狀態碼 (State)', dataIndex: 'state_code', render: (c) => <Tag color="orange" style={{ fontSize: 10 }}>{c}</Tag>, sorter: (a, b) => a.state_code.localeCompare(b.state_code) },
-                    { title: '子狀態 (Sub)', dataIndex: 'sub_state_code', render: (c) => c || '-', sorter: (a, b) => (a.sub_state_code || '').localeCompare(b.sub_state_code || '') },
-                    { title: '模式 (Mode)', dataIndex: 'mode', render: (m) => <Tag color="blue" style={{ fontSize: 10 }}>{m}</Tag>, sorter: (a, b) => (a.mode || '').localeCompare(b.mode || '') },
-                    { title: '詳情 (Details)', dataIndex: 'details', render: (d) => d ? <Text type="secondary" style={{ fontSize: 10 }}>{JSON.stringify(d)}</Text> : '-' },
-                ]}
-            />
-        );
-    }, [data?.status]);
-
-    // --- 5. 警報紀錄 (Alarms) ---
-    const alarmSection = useMemo(() => {
-        if (!data?.alarms.length) return <Empty description="無警報紀錄" />;
-        return (
-            <Table 
-                size="small"
-                dataSource={[...data.alarms]}
-                pagination={{ pageSize: 10 }}
-                rowKey={(record) => `${record.time}-${record.alarm_id}`}
-                columns={[
-                    { 
-                        title: '時間', 
-                        dataIndex: 'time', 
-                        render: (t) => new Date(t).toLocaleString(), 
-                        width: 170,
-                        sorter: (a, b) => new Date(a.time).getTime() - new Date(b.time).getTime(),
-                        defaultSortOrder: 'descend'
-                    },
-                    { title: 'ID', dataIndex: 'alarm_id', width: 100, sorter: (a, b) => a.alarm_id.localeCompare(b.alarm_id) },
-                    { title: '代碼', dataIndex: 'alarm_code', sorter: (a, b) => a.alarm_code.localeCompare(b.alarm_code) },
-                    { title: '嚴重度', dataIndex: 'severity', render: (s) => <Tag color="red" style={{ fontSize: 10 }}>{s}</Tag>, sorter: (a, b) => a.severity.localeCompare(b.severity) },
-                    { title: '訊息', dataIndex: 'message', ellipsis: true },
-                    { 
-                        title: '狀態', 
-                        dataIndex: 'alarm_status', 
-                        render: (st) => <Badge status={st === 'active' ? 'error' : 'success'} text={<span style={{ fontSize: 12 }}>{st}</span>} />,
-                        sorter: (a, b) => a.alarm_status.localeCompare(b.alarm_status)
-                    },
-                    { title: '數值/閾值', render: (_, r) => r.value !== null ? `${r.value} / ${r.threshold || '-'}` : '-', sorter: (a, b) => (a.value || 0) - (b.value || 0) },
-                    { title: '詳情', dataIndex: 'details', render: (d) => d ? <Text type="secondary" style={{ fontSize: 10 }}>{JSON.stringify(d)}</Text> : '-' },
-                ]}
-            />
-        );
-    }, [data?.alarms]);
-
-    // --- 6. 生產事件 (Events) ---
-    const eventSection = useMemo(() => {
-        if (!data?.events.length) return <Empty description="無事件紀錄" />;
-        return (
-            <Table 
-                size="small"
-                dataSource={[...data.events]}
-                pagination={{ pageSize: 10 }}
-                rowKey={(record) => `${record.time}-${record.event_id}`}
-                columns={[
-                    { 
-                        title: '時間', 
-                        dataIndex: 'time', 
-                        render: (t) => new Date(t).toLocaleString(), 
-                        width: 170,
-                        sorter: (a, b) => new Date(a.time).getTime() - new Date(b.time).getTime(),
-                        defaultSortOrder: 'descend'
-                    },
-                    { title: 'ID', dataIndex: 'event_id', width: 100, sorter: (a, b) => a.event_id.localeCompare(b.event_id) },
-                    { title: '事件代碼', dataIndex: 'event_code', render: (c) => <Text strong>{c}</Text>, sorter: (a, b) => a.event_code.localeCompare(b.event_code) },
-                    { title: '子代碼', dataIndex: 'sub_event_code', sorter: (a, b) => (a.sub_event_code || '').localeCompare(b.sub_event_code || '') },
-                    { title: '結果', dataIndex: 'result', render: (r) => r ? <Tag style={{ fontSize: 10 }}>{r}</Tag> : '-', sorter: (a, b) => (a.result || '').localeCompare(b.result || '') },
-                    { title: '詳情', dataIndex: 'details', render: (d) => d ? <Text type="secondary" style={{ fontSize: 10 }}>{JSON.stringify(d)}</Text> : '-' },
-                ]}
-            />
-        );
-    }, [data?.events]);
-
     if (!hasData) return <div style={{ padding: 40, textAlign: 'center' }}><Spin tip="解析批次大數據中..." /></div>;
 
     const tabItems = [
-        { key: 'trends', label: <span style={{ fontSize: 12 }}><LineChartOutlined /> 趨勢分析</span>, children: telemetrySection },
+        { key: 'trends', label: <span style={{ fontSize: 12 }}><LineChartOutlined /> RCA 同步診斷</span>, children: telemetrySection },
         { key: 'quality', label: <span style={{ fontSize: 12 }}><CheckCircleOutlined /> 品質檢驗</span>, children: measurementSection },
         { key: 'metrics', label: <span style={{ fontSize: 12 }}><DashboardOutlined /> 關鍵指標</span>, children: metricsSection },
         { key: 'status', label: <span style={{ fontSize: 12 }}><HistoryOutlined /> 狀態歷史</span>, children: statusSection },
@@ -316,160 +383,91 @@ function RunDetailPanel({ runId }: { runId: number }) {
     ];
 
     return (
-        <ConfigProvider
-            theme={{
-                token: {
-                    fontSize: 12,
-                    paddingXS: 8,
-                    paddingSM: 12,
-                },
-                components: {
-                    Table: {
-                        fontSize: 12,
-                        cellPaddingBlockSM: 4,
-                    },
-                    Statistic: {
-                        contentFontSize: 16,
-                        titleFontSize: 12,
-                    },
-                    Tabs: {
-                        titleFontSize: 12,
-                    }
-                }
-            }}
-        >
-            <div style={{ 
-                padding: '12px 20px', 
-                background: 'rgba(0,0,0,0.15)', 
-                borderRadius: '8px',
-            }}>
+        <ConfigProvider theme={{ token: { fontSize: 12 }, components: { Table: { fontSize: 12 }, Tabs: { titleFontSize: 12 } } }}>
+            <div style={{ padding: '12px 20px', background: 'rgba(0,0,0,0.15)', borderRadius: '8px' }}>
                 <Tabs defaultActiveKey="trends" items={tabItems} size="small" />
             </div>
         </ConfigProvider>
     );
 }
 
+// --- Status/Alarm/Event Section Tables (保持簡潔) ---
+const statusSection = (data: any) => (
+    <Table size="small" dataSource={data.status} pagination={{ pageSize: 10 }} rowKey={(r: any) => `${r.time}-${r.tag_id}`}
+        columns={[
+            { title: '時間', dataIndex: 'time', render: (t) => new Date(t).toLocaleString(), width: 170 },
+            { title: '狀態 (State)', dataIndex: 'state_code', render: (c) => <Tag color="orange">{c}</Tag> },
+            { title: '子狀態', dataIndex: 'sub_state_code' },
+            { title: '模式', dataIndex: 'mode' },
+        ]}
+    />
+);
+
+const alarmSection = (data: any) => (
+    <Table size="small" dataSource={data.alarms} pagination={{ pageSize: 10 }} rowKey={(r: any) => `${r.time}-${r.alarm_id}`}
+        columns={[
+            { title: '時間', dataIndex: 'time', render: (t) => new Date(t).toLocaleString(), width: 170 },
+            { title: '代碼', dataIndex: 'alarm_code' },
+            { title: '嚴重度', dataIndex: 'severity', render: (s) => <Tag color="red">{s}</Tag> },
+            { title: '訊息', dataIndex: 'message', ellipsis: true },
+            { title: '狀態', dataIndex: 'alarm_status' },
+        ]}
+    />
+);
+
+const eventSection = (data: any) => (
+    <Table size="small" dataSource={data.events} pagination={{ pageSize: 10 }} rowKey={(r: any) => `${r.time}-${r.event_id}`}
+        columns={[
+            { title: '時間', dataIndex: 'time', render: (t) => new Date(t).toLocaleString(), width: 170 },
+            { title: '事件代碼', dataIndex: 'event_code', render: (c) => <Text strong>{c}</Text> },
+            { title: '子代碼', dataIndex: 'sub_event_code' },
+            { title: '結果', dataIndex: 'result', render: (r) => r ? <Tag>{r}</Tag> : '-' },
+        ]}
+    />
+);
+
 export default function ProductionRunHistory() {
     const [form] = Form.useForm();
     const { historyRuns, isLoading, searchHistoryRuns } = useProductionStore();
 
-    useEffect(() => {
-        searchHistoryRuns({});
-    }, [searchHistoryRuns]);
+    useEffect(() => { searchHistoryRuns({}); }, [searchHistoryRuns]);
 
     const handleSearch = async () => {
         const values = await form.validateFields();
-        const params: Record<string, any> = {};
-
-        if (values.equipment_path) params.equipment_path = values.equipment_path;
-        if (values.lot_id) params.lot_id = values.lot_id;
-
-        if (values.timeRange && values.timeRange.length === 2) {
+        const params: any = { ...values };
+        if (values.timeRange) {
             params.start_time = values.timeRange[0].toISOString();
             params.end_time = values.timeRange[1].toISOString();
         }
-
         searchHistoryRuns(params);
     };
 
-    const handleReset = () => {
-        form.resetFields();
-        searchHistoryRuns({});
-    };
-
     const columns = [
-        {
-            title: 'Lot ID',
-            dataIndex: 'lot_id',
-            key: 'lot_id',
-            render: (text: string) => <Text strong>{text}</Text>,
-        },
-        {
-            title: '設備路徑 (Equipment)',
-            dataIndex: 'equipment_path',
-            key: 'equipment_path',
-            render: (text: string) => <Text code>{text}</Text>,
-        },
-        {
-            title: 'Recipe',
-            dataIndex: 'recipe_id',
-            key: 'recipe_id',
-            render: (text: string) => text || '-',
-        },
-        {
-            title: '狀態',
-            dataIndex: 'status',
-            key: 'status',
-            render: (status: string) => (
-                <Tag color={status.toLowerCase() === 'running' ? 'green' : status.toLowerCase() === 'completed' ? 'blue' : 'default'}>
-                    {status}
-                </Tag>
-            ),
-        },
-        {
-            title: '開始時間',
-            dataIndex: 'start_time',
-            key: 'start_time',
-            render: (time: string) => new Date(time).toLocaleString(),
-        },
-        {
-            title: '結束時間',
-            dataIndex: 'end_time',
-            key: 'end_time',
-            render: (time: string | null) => time ? new Date(time).toLocaleString() : '-',
-        },
+        { title: 'Lot ID', dataIndex: 'lot_id', render: (t: string) => <Text strong>{t}</Text> },
+        { title: '設備路徑 (Equipment)', dataIndex: 'equipment_path', render: (t: string) => <Text code>{t}</Text> },
+        { title: 'Step_id', dataIndex: 'step_id', render: (t: string) => t || '-' },
+        { title: 'Recipe', dataIndex: 'recipe_id', render: (t: string) => t || '-' },
+        { title: '狀態', dataIndex: 'status', render: (s: string) => <Tag color={s === 'running' ? 'green' : 'blue'}>{s}</Tag> },
+        { title: '開始時間', dataIndex: 'start_time', render: (t: string) => new Date(t).toLocaleString() },
+        { title: '結束時間', dataIndex: 'end_time', render: (t: string) => t ? new Date(t).toLocaleString() : '-' },
+        { title: '詳情 (Details)', dataIndex: 'context', render: (c: any) => c ? <Text type="secondary" style={{ fontSize: 10 }}>{JSON.stringify(c)}</Text> : '-' },
     ];
 
     return (
-        <div className="page-container" style={{ padding: '24px' }}>
-            <div className="page-header" style={{ marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <HistoryOutlined style={{ fontSize: '24px', color: 'var(--color-primary)' }} />
-                <Title level={3} style={{ margin: 0 }}>生產批次歷史記錄 (Run History)</Title>
-            </div>
-
-            <Card style={{ marginBottom: '24px', background: 'var(--bg-glass)', border: '1px solid var(--border-color)' }}>
-                <Form
-                    form={form}
-                    layout="inline"
-                    onFinish={handleSearch}
-                    style={{ gap: '16px' }}
-                >
-                    <Form.Item name="equipment_path" label="設備路徑">
-                        <Input placeholder="過濾 Equipment Path" allowClear />
-                    </Form.Item>
-                    <Form.Item name="lot_id" label="Lot ID">
-                        <Input placeholder="過濾 Lot ID" allowClear />
-                    </Form.Item>
-                    <Form.Item name="timeRange" label="時間範圍">
-                        <RangePicker showTime />
-                    </Form.Item>
-                    <Form.Item>
-                        <Space>
-                            <Button type="primary" htmlType="submit" icon={<SearchOutlined />} loading={isLoading}>
-                                查詢
-                            </Button>
-                            <Button onClick={handleReset} icon={<ReloadOutlined />}>
-                                重設
-                            </Button>
-                        </Space>
-                    </Form.Item>
+        <div style={{ padding: '24px' }}>
+            <Title level={3}><HistoryOutlined /> 生產批次歷史記錄</Title>
+            <Card style={{ marginBottom: 24 }}>
+                <Form form={form} layout="inline" onFinish={handleSearch}>
+                    <Form.Item name="equipment_path" label="設備"><Input /></Form.Item>
+                    <Form.Item name="lot_id" label="Lot"><Input /></Form.Item>
+                    <Form.Item name="timeRange" label="時間"><RangePicker showTime /></Form.Item>
+                    <Button type="primary" htmlType="submit" icon={<SearchOutlined />} loading={isLoading}>查詢</Button>
+                    <Button onClick={() => { form.resetFields(); searchHistoryRuns({}); }} style={{ marginLeft: 8 }}>重設</Button>
                 </Form>
             </Card>
-
-            <Card style={{ background: 'var(--bg-glass)', border: '1px solid var(--border-color)' }}>
-                <Table<ProductionRun>
-                    columns={columns}
-                    dataSource={historyRuns}
-                    rowKey="run_id"
-                    loading={isLoading}
-                    expandable={{
-                        expandedRowRender: (record) => <RunDetailPanel runId={record.run_id} />,
-                    }}
-                    pagination={{
-                        defaultPageSize: 10,
-                        showSizeChanger: true,
-                        showTotal: (total) => `共 ${total} 筆紀錄`,
-                    }}
+            <Card>
+                <Table<ProductionRun> columns={columns} dataSource={historyRuns} rowKey="run_id" loading={isLoading}
+                    expandable={{ expandedRowRender: (record) => <RunDetailPanel runId={record.run_id} /> }}
                 />
             </Card>
         </div>

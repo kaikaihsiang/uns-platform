@@ -135,7 +135,7 @@ def main():
     parser = argparse.ArgumentParser(description="UNS Smart Factory Scenario Simulator")
     parser.add_argument("--scenario", type=str, choices=["telemetry", "status", "alarm", "event", "measurement", "metrics", "lifecycle"], required=True)
     parser.add_argument("--count", type=int, default=1, help="Number of times to run the scenario")
-    parser.add_argument("--interval", type=float, default=1.0, help="Interval between logs in lifecycle mode")
+    parser.add_argument("--interval", type=float, default=2.0, help="Interval between logs in lifecycle mode")
     args = parser.parse_args()
 
     client = mqtt.Client(client_id=f"sim_{args.scenario}")

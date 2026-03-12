@@ -18,7 +18,8 @@ jobs:
       - name: Install Ruff
         run: pip install ruff
       - name: Run Ruff
-        run: ruff check . --exclude archive
+        # 嚴格檢查後端與資料引擎，排除非生產代碼與歷史封存
+        run: ruff check backend data-engine --exclude archive,demo,mcp-server
 
   backend-tests:
     runs-on: ubuntu-latest
@@ -54,11 +55,12 @@ jobs:
             echo "Waiting for database..."
             sleep 2
           done
+          # 基礎 Schema
           for f in docker/init-db/*.sql; do
             echo "Executing $f..."
             psql -h localhost -U uns_admin -d uns_test -f "$f"
           done
-          echo "Defining test helpers..."
+          # 測試輔助工具 (Truncate helpers)
           psql -h localhost -U uns_admin -d uns_test -f ops/init_test_db.sql
       - name: Run tests
         env:
@@ -105,7 +107,6 @@ jobs:
             echo "Executing $f..."
             psql -h localhost -U uns_admin -d uns_test -f "$f"
           done
-          echo "Defining test helpers..."
           psql -h localhost -U uns_admin -d uns_test -f ops/init_test_db.sql
       - name: Run tests
         env:
@@ -118,8 +119,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Set up Node.js
-        uses: actions/setup-python@v5 # Actually uses Node in standard setup, but here we just need npm
       - uses: actions/setup-node@v4
         with:
           node-version: '20'

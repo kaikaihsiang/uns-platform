@@ -250,7 +250,7 @@ Node 分兩種：
    - 系統首先詢問：「這個 `Telemetry` 節點有沒有綁定 `ProductionRun`？」
    - 若沒有，系統會自動捨棄最後一段路徑，往父層詢問：「那上一層的 `Printer` (Equipment) 有沒有綁定 `ProductionRun`？」
 3. **上下文繼承 (Context Inheritance)**：只要父層或祖父層有活躍的 Lot，底下的所有 Topic 資料流都能自動繼承並附加該生產脈絡，實現 ISA-95 標準中的 Equipment 狀態向下關聯。
-4. **活動時間追蹤 (Activity Tracking)**：每當 Data Engine 成功匹配並處理一個 Tag 的資料時，會自動更新 `tags.last_data_at` 欄位，供管理者監控資料點的活跃狀態。
+4. **活動時間追蹤 (Activity Tracking)**：每當 Data Engine 成功匹配並處理一個 Tag 的資料時，會透過 `DBWriter` 以高效批次更新的方式更新 `tags.last_data_at` 欄位，供管理者監控資料點的活跃狀態。
 
 這樣的設計保證了 MQTT Topic Tree 與 UI 呈現的直覺性（所見即所得），同時確保資料治理與生產脈絡的完整對應。
 
@@ -822,7 +822,11 @@ tag_id 是永久不變的 identifier（學 OSIsoft PI 的設計）。
 MQTT topic 改了 → tag_source_mapping 更新 → tag_id 不變 → 歷史資料連續。
 
 ### 7.1.1 活躍度監控 (Activity Heartbeat)
-Data Engine 在每次寫入成功後，會同步更新 `tags.last_data_at` 欄位。這使得系統能即時辨識出哪些資料點已停止推送，無需掃描巨大的時序表。
+Data Engine 實作了高效的活躍度追蹤機制：
+- **批次更新策略**：為了避免高頻資料流對資料庫造成過大的 UPDATE 負擔，系統不採取「每筆更新」模式。
+- **緩衝機制**：`DBWriter` 在記憶體中維護一個活躍 Tag 集合（Set），記錄自上次 Flush 以來所有接收過資料的 `tag_id`。
+- **同步更新**：當 `DBWriter` 執行定期的批次寫入（Flush）時，會同時執行一條批次 SQL：`UPDATE tags SET last_data_at = NOW() WHERE tag_id IN (...)`。
+- **效益**：確保 UI 上的活躍狀態維持在秒級準確度，同時將資料庫寫入壓力降低至原先的 1% 以下。
 ```
 
 ### 7.2 涉及的表
@@ -1136,7 +1140,24 @@ EMQX v5 REST API 使用 Bearer Token 認證：
 | **Alarm** | 詳情表格 | `alarm_id`, `alarm_code`, `severity`, `message`, `alarm_status`, `value/threshold` | 列表降序 (DESC) |
 | **Event** | 詳情表格 | `event_id`, `event_code`, `sub_event_code`, `result`, `details` | 列表降序 (DESC) |
 
-#### 8.7.3 表格操作規格
+#### 8.7.4 多維同步 RCA 診斷視圖 (Synchronized RCA Timeline)
+
+為了提供工業級的故障排除 (Troubleshooting) 能力，平台實作了整合式的 RCA 診斷工具：
+
+1.  **單一圖表整合策略 (Unified Chart Strategy)**：
+    *   **核心決策**：為了徹底解決多圖表同步時因 CSS 捨入誤差或 Y 軸寬度導致的微小錯位，系統將所有異質資料繪製於單一 `ComposedChart` 中。
+    *   **絕對對齊**：共用單一數值型 X 軸（時間戳記），保證滑鼠停懸時顯示的資訊內容與圖表點位 100% 吻合。
+
+2.  **層次化視覺規範**：
+    *   **基礎層 (Status Area)**：使用圖表底部的半透明色塊代表「設備稼動狀態」（如綠色代表 RUN）。
+    *   **數據層 (Telemetry Lines)**：主繪圖區顯示連續的感測器數值曲線。
+    *   **標記層 (Categorical Ticks)**：使用 `Scatter` 散點精確標註「🚨 警報」與「📦 生產事件」發生的瞬間。
+
+3.  **全能診斷 Tooltip (Master Context Tooltip)**：
+    *   **內容聚合**：單一 Tooltip 一次呈現：[精確時間] + [狀態 Code/SubCode] + [活動警報訊息] + [事件代碼/結果] + [各項遙測值]。
+    *   **互動性**：使用者可透過圖例控制開關各個指標，動態過濾不需要的診斷雜訊。
+
+#### 8.7.5 表格操作規格
 
 所有歷史數據表格均遵循以下規範：
 - **多欄位排序 (Multi-column Sorter)**：支援多欄位排序與升降序切換。

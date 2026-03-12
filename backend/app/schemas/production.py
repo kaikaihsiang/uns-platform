@@ -9,7 +9,7 @@ class ProductionRunBase(BaseModel):
     parent_lot_id: Optional[str] = None
     equipment_path: str = Field(..., description="The full namespace path to the equipment")
     chamber_id: Optional[str] = None
-    step_id: str = Field(..., description="The manufacturing step ID")
+    step_id: Optional[str] = Field(None, description="The manufacturing step ID")
     pass_number: int = 1
     recipe_id: Optional[str] = None
     recipe_version: Optional[str] = None

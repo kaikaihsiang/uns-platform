@@ -113,13 +113,6 @@ class TagLookup:
                 row = cur.fetchone()
                 if row:
                     tag_id, asset_path = row[0], row[1]
-                    cur_upd = conn.cursor()
-                    try:
-                        cur_upd.execute("UPDATE tags SET last_data_at = NOW() WHERE tag_id = %s", (tag_id,))
-                        conn.commit()
-                    except Exception: conn.rollback()
-                    finally: cur_upd.close()
-
                     self._cache[key] = (tag_id, asset_path)
                     cur.close()
                     return (tag_id, asset_path)

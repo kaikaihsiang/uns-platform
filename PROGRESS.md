@@ -50,6 +50,8 @@
 | F4 (Phase 2): Ops Scripts | ✅ DONE | backend-engineer | 2026-03-06 | 實作一鍵啟動 (`start_all.sh`) 與一鍵關閉 (`stop_all.sh`) 提升維運體驗 |
 | F4 (Phase 3): DevOps | ✅ DONE | gemini-cli | 2026-03-11 | 基礎設施與 14+ 測試案例已通過 GitHub CI 驗證 (Backend/Data-Engine/Frontend)，具備工業級自動化測試網 |
 | F12: Robustness Data Bag | ✅ DONE | gemini-cli | 2026-03-11 | 實作「單一溢位出口」機制與 Payload Schema 命名重構，確保動態欄位不遺失且不干擾 Context |
+| F13: Tag Activity Heartbeat | ✅ DONE | gemini-cli | 2026-03-12 | 實作 `tags.last_data_at` 的高效批次更新機制，降低資料庫 UPDATE 負擔並確保活躍度準確 |
+| F14: Synchronized RCA Timeline | ✅ DONE | gemini-cli | 2026-03-12 | 實作「全維度同步 RCA 視圖」，整合遙測、狀態、警報與事件於單一時間軸，解決視覺錯位並提升診斷效率 |
 | F5 (Phase 2): Data Engine Test Arsenal | ✅ DONE | data-engine-engineer | 2026-03-06 | 實作 `reset_db.sh`、`seed_namespace.sh` (TaiwanPrecision) 與智慧工廠模擬器 (`start_sim.sh`) |
 
 ## 🔴 Blockers / Decisions Needed
