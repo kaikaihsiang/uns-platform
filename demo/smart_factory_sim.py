@@ -46,7 +46,10 @@ def publish_scenario_telemetry(client):
                 "temp": "°C",
                 "press": "kPa",
                 "vib": "mm/s"
-            }
+            },
+            "usl": 50.0,
+            "lsl": 30.0,
+            "target": 40.0
         }
     }
     client.publish(T_MOUNTER_TEL, json.dumps(payload))
@@ -107,7 +110,8 @@ def publish_scenario_measurement(client):
             "panel_id": "PCB-M1-1002",
             "component_ref": "U12",
             "is_pass": True,
-            "offset_x": round(random.uniform(0.01, 0.02), 3)
+            "offset_x": round(random.uniform(0.01, 0.02), 3),
+            "instrument_id": "AOI-CAL-99"
         }
     }
     client.publish(T_AOI_MEASURE, json.dumps(payload))

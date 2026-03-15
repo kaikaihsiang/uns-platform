@@ -105,6 +105,7 @@ CREATE TABLE IF NOT EXISTS tags (
     unit          TEXT,
     data_type     TEXT NOT NULL DEFAULT 'float',
     description   TEXT,
+    metadata      JSONB DEFAULT '{}',          -- 靜態元數據 (如 vendor, criticality)
     created_at    TIMESTAMPTZ DEFAULT NOW(),
     last_data_at  TIMESTAMPTZ,
     deleted_at    TIMESTAMPTZ,
@@ -115,6 +116,23 @@ CREATE TABLE IF NOT EXISTS tags (
 CREATE INDEX IF NOT EXISTS idx_tags_asset_path ON tags(asset_path);
 CREATE INDEX IF NOT EXISTS idx_tags_category ON tags(category);
 CREATE INDEX IF NOT EXISTS idx_tags_asset_category ON tags(asset_path, category);
+CREATE INDEX IF NOT EXISTS idx_tags_metadata ON tags USING GIN (metadata);
+
+-- ─── Latest Values Snapshot ───────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS latest_values (
+    tag_id          INTEGER PRIMARY KEY REFERENCES tags(tag_id),
+    time            TIMESTAMPTZ NOT NULL,
+    category        TEXT NOT NULL,
+    display_value   TEXT,
+    data            JSONB NOT NULL,
+    quality         TEXT DEFAULT 'good',
+    run_id          INTEGER,
+    metadata        JSONB
+);
+
+CREATE INDEX IF NOT EXISTS idx_lv_run_id ON latest_values(run_id) WHERE run_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_lv_category ON latest_values(category);
 
 
 -- ─── Tag Source Mapping ──────────────────────────────────────
@@ -474,6 +492,7 @@ BEGIN
     TRUNCATE TABLE public.tag_source_mapping RESTART IDENTITY CASCADE;
     TRUNCATE TABLE public.tag_change_log RESTART IDENTITY CASCADE;
     TRUNCATE TABLE public.master_data_codes RESTART IDENTITY CASCADE;
+    TRUNCATE TABLE public.latest_values RESTART IDENTITY CASCADE;
 
     -- Truncate hyper tables
     TRUNCATE TABLE public.ts_telemetry RESTART IDENTITY CASCADE;

@@ -37,6 +37,9 @@ async def db_session(test_engine):
     
     async with session_local() as session:
         await seed_test_data(session)
+        # Force refresh metadata cache so tests see the seeded/newly created tags
+        from app.services.tag_metadata_cache import TagMetadataCache
+        await TagMetadataCache.get_instance().refresh_if_needed(session, force=True)
         yield session
 
 @pytest.fixture

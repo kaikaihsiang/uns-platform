@@ -90,9 +90,24 @@ class Tag(Base):
     unit = Column(Text, nullable=True)
     data_type = Column(Text, nullable=False, default="float")
     description = Column(Text, nullable=True)
+    extra_metadata = Column("metadata", JSONB, nullable=True, default=dict)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     last_data_at = Column(DateTime(timezone=True), nullable=True)
     deleted_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class LatestValue(Base):
+    __tablename__ = "latest_values"
+
+    tag_id = Column(Integer, ForeignKey("tags.tag_id"), primary_key=True)
+    time = Column(DateTime(timezone=True), nullable=False)
+    category = Column(Text, nullable=False)
+    display_value = Column(Text)
+    data = Column(JSONB, nullable=False)
+    quality = Column(Text, default="good")
+    run_id = Column(Integer, nullable=True)
+    context_data = Column(JSONB)
+
 
 
 class TagSourceMapping(Base):

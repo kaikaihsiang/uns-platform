@@ -1,16 +1,18 @@
 """
 UNS Platform Backend — FastAPI Application
 """
+import asyncio
 import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.v1 import ai, data, namespace, production_runs, system, tags
+from app.api.v1 import ai, data, namespace, production_runs, semantic, system, tags
 from app.api.v1 import schema_types as payload_schemas
 from app.core.config import settings
 from app.core.database import engine
+from app.services.semantic_service import serve_grpc
 
 
 @asynccontextmanager
@@ -18,8 +20,20 @@ async def lifespan(app: FastAPI):
     """Application lifespan: startup / shutdown."""
     # Startup — record start time for uptime tracking
     app.state.start_time = time.time()
+    
+    # Start gRPC server in background
+    grpc_task = asyncio.create_task(serve_grpc())
+    
     yield
-    # Shutdown — dispose engine connection pool.
+    
+    # Shutdown
+    grpc_task.cancel()
+    try:
+        await grpc_task
+    except asyncio.CancelledError:
+        pass
+        
+    # Dispose engine connection pool.
     await engine.dispose()
 
 
@@ -49,6 +63,7 @@ app.include_router(payload_schemas.router, prefix="/api/v1")
 app.include_router(system.router, prefix="/api/v1")
 app.include_router(ai.router, prefix="/api/v1")
 app.include_router(production_runs.router, prefix="/api/v1")
+app.include_router(semantic.router, prefix="/api/v1")
 
 
 # --- Health Check ---

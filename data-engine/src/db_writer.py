@@ -5,187 +5,27 @@ Batch INSERT to ts_telemetry + ts_raw_payloads (Dual Storage)。
 使用 psycopg2.extras.execute_values 做高效批次寫入。
 支援 buffer + flush 機制、冪等寫入 (ON CONFLICT DO NOTHING)。
 """
-
 import logging
 import threading
 import time
 from datetime import datetime
-from typing import Optional
 
 from psycopg2.extras import Json, execute_values
 
+from .asdict_helper import _asdict_minus_context_data
 from .db_pool import DBPool
+from .display_value_generator import _generate_display_value
+from .records import (
+    AlarmRecord,
+    EventRecord,
+    MeasurementRecord,
+    MetricsRecord,
+    RawPayloadRecord,
+    StatusRecord,
+    TelemetryRecord,
+)
 
 logger = logging.getLogger("uns.db_writer")
-
-
-class TelemetryRecord:
-    """ts_telemetry 寫入記錄。"""
-
-    __slots__ = ("time", "tag_id", "value", "value_text", "value_json", "quality", "run_id", "lot_id")
-
-    def __init__(
-        self,
-        time: datetime,
-        tag_id: int,
-        value: Optional[float] = None,
-        value_text: Optional[str] = None,
-        value_json: object = None,
-        quality: str = "good",
-        run_id: Optional[int] = None,
-        lot_id: Optional[str] = None,
-    ):
-        self.time = time
-        self.tag_id = tag_id
-        self.value = value
-        self.value_text = value_text
-        self.value_json = value_json
-        self.quality = quality
-        self.run_id = run_id
-        self.lot_id = lot_id
-
-
-class RawPayloadRecord:
-    """ts_raw_payloads 寫入記錄。"""
-
-    __slots__ = ("time", "topic", "payload", "schema_id", "payload_size")
-
-    def __init__(
-        self,
-        time: datetime,
-        topic: str,
-        payload: dict,
-        schema_id: Optional[int] = None,
-        payload_size: int = 0,
-    ):
-        self.time = time
-        self.topic = topic
-        self.payload = payload
-        self.schema_id = schema_id
-        self.payload_size = payload_size
-
-
-class StatusRecord:
-    """ts_status 寫入記錄。"""
-    __slots__ = ("time", "tag_id", "state_code", "sub_state_code", "code_category", "mode", "run_id", "lot_id", "details")
-
-    def __init__(self, time: datetime, tag_id: int, state_code: str, 
-                 sub_state_code: Optional[str] = None, code_category: Optional[str] = None,
-                 mode: Optional[str] = None,
-                 run_id: Optional[int] = None, lot_id: Optional[str] = None,
-                 details: Optional[object] = None):
-        self.time = time
-        self.tag_id = tag_id
-        self.state_code = state_code
-        self.sub_state_code = sub_state_code
-        self.code_category = code_category
-        self.mode = mode
-        self.run_id = run_id
-        self.lot_id = lot_id
-        self.details = details
-
-
-class AlarmRecord:
-    """ts_alarms 寫入記錄。"""
-    __slots__ = ("time", "tag_id", "alarm_id", "alarm_code", "sub_alarm_code", "code_category", "severity", "message", "alarm_status", "value", "threshold", "run_id", "lot_id", "details")
-
-    def __init__(self, time: datetime, tag_id: int, alarm_id: str, alarm_code: str, 
-                 sub_alarm_code: Optional[str] = None, code_category: Optional[str] = None,
-                 severity: str = "warning", message: Optional[str] = None, alarm_status: str = "active",
-                 value: Optional[float] = None, threshold: Optional[float] = None,
-                 run_id: Optional[int] = None, lot_id: Optional[str] = None,
-                 details: Optional[object] = None):
-        self.time = time
-        self.tag_id = tag_id
-        self.alarm_id = alarm_id
-        self.alarm_code = alarm_code
-        self.sub_alarm_code = sub_alarm_code
-        self.code_category = code_category
-        self.severity = severity
-        self.message = message
-        self.alarm_status = alarm_status
-        self.value = value
-        self.threshold = threshold
-        self.run_id = run_id
-        self.lot_id = lot_id
-        self.details = details
-
-
-class EventRecord:
-    """ts_events 寫入記錄。"""
-    __slots__ = ("time", "tag_id", "event_id", "event_code", "sub_event_code", "code_category", "result", "run_id", "lot_id", "details")
-
-    def __init__(self, time: datetime, tag_id: int, event_id: str, event_code: str,
-                 sub_event_code: Optional[str] = None, code_category: Optional[str] = None,
-                 result: Optional[str] = None,
-                 run_id: Optional[int] = None, lot_id: Optional[str] = None,
-                 details: Optional[object] = None):
-        self.time = time
-        self.tag_id = tag_id
-        self.event_id = event_id
-        self.event_code = event_code
-        self.sub_event_code = sub_event_code
-        self.code_category = code_category
-        self.result = result
-        self.run_id = run_id
-        self.lot_id = lot_id
-        self.details = details
-
-
-class MeasurementRecord:
-    """ts_measurements 寫入記錄。"""
-    __slots__ = ("time", "tag_id", "value", "spec_upper", "spec_lower", "target_value", "result", "run_id", "lot_id", "step_id", "sample_id", "sample_position", "inspector", "context", "details")
-
-    def __init__(self, time: datetime, tag_id: int, value: float,
-                 spec_upper: Optional[float] = None, spec_lower: Optional[float] = None,
-                 target_value: Optional[float] = None,
-                 result: str = "pass",
-                 run_id: Optional[int] = None, lot_id: Optional[str] = None,
-                 step_id: Optional[str] = None,
-                 sample_id: Optional[str] = None, sample_position: Optional[str] = None,
-                 inspector: Optional[str] = None,
-                 context: Optional[dict] = None,
-                 details: Optional[object] = None):
-        self.time = time
-        self.tag_id = tag_id
-        self.value = value
-        self.spec_upper = spec_upper
-        self.spec_lower = spec_lower
-        self.target_value = target_value
-        self.result = result
-        self.run_id = run_id
-        self.lot_id = lot_id
-        self.step_id = step_id
-        self.sample_id = sample_id
-        self.sample_position = sample_position
-        self.inspector = inspector
-        self.context = context
-        self.details = details
-
-
-class MetricsRecord:
-    """ts_metrics 寫入記錄。"""
-    __slots__ = ("time", "tag_id", "metric_category", "metric_code", "sub_metric_code", "period", "values", "run_id", "lot_id", "context", "details")
-
-    def __init__(self, time: datetime, tag_id: int, 
-                 metric_category: str, metric_code: str, sub_metric_code: Optional[str] = None,
-                 period: Optional[str] = None,
-                 values: dict = None,
-                 run_id: Optional[int] = None, lot_id: Optional[str] = None,
-                 context: Optional[dict] = None,
-                 details: Optional[object] = None):
-        self.time = time
-        self.tag_id = tag_id
-        self.metric_category = metric_category
-        self.metric_code = metric_code
-        self.sub_metric_code = sub_metric_code
-        self.period = period
-        self.values = values or {}
-        self.run_id = run_id
-        self.lot_id = lot_id
-        self.context = context
-        self.details = details
-
 
 class DBWriter:
     """
@@ -218,6 +58,9 @@ class DBWriter:
 
         # 活躍 Tag 追蹤 (用於批次更新 last_data_at)
         self._seen_tags: set[int] = set()
+        
+        # Latest Values 快照快取 (用於批次 UPSERT 到 latest_values)
+        self._latest_values_to_upsert: dict[int, dict] = {}
 
         # 統計
         self._total_telemetry_written = 0
@@ -229,10 +72,30 @@ class DBWriter:
         if tag_id:
             self._seen_tags.add(tag_id)
 
+    def _update_latest_cache(self, tag_id: int, category: str, record: object):
+        """更新最新值快照緩存，確保同一批次中只保留每個 Tag 最新的記錄。"""
+        if not tag_id or not hasattr(record, "time"):
+            return
+
+        time_val = record.time
+        existing = self._latest_values_to_upsert.get(tag_id)
+        if not existing or time_val >= existing["time"]:
+            self._latest_values_to_upsert[tag_id] = {
+                "tag_id": tag_id,
+                "time": time_val,
+                "category": category,
+                "display_value": _generate_display_value(category, record),
+                "data": _asdict_minus_context_data(record),
+                "quality": getattr(record, "quality", "good"),
+                "run_id": getattr(record, "run_id", None),
+                "context_data": getattr(record, "context_data", None),
+            }
+
     def add_telemetry(self, record: TelemetryRecord):
         """新增一筆 telemetry 記錄到 buffer。"""
         with self._lock:
             self._mark_tag_seen(record.tag_id)
+            self._update_latest_cache(record.tag_id, "telemetry", record)
             self._telemetry_buffer.append(record)
             if len(self._telemetry_buffer) >= self._batch_size:
                 self._flush_telemetry()
@@ -241,6 +104,7 @@ class DBWriter:
         """新增一筆 status 記錄到 buffer。"""
         with self._lock:
             self._mark_tag_seen(record.tag_id)
+            self._update_latest_cache(record.tag_id, "status", record)
             self._status_buffer.append(record)
             if len(self._status_buffer) >= self._batch_size:
                 self._flush_status()
@@ -249,6 +113,7 @@ class DBWriter:
         """新增一筆 alarm 記錄到 buffer。"""
         with self._lock:
             self._mark_tag_seen(record.tag_id)
+            self._update_latest_cache(record.tag_id, "alarm", record)
             self._alarm_buffer.append(record)
             if len(self._alarm_buffer) >= self._batch_size:
                 self._flush_alarm()
@@ -257,6 +122,7 @@ class DBWriter:
         """新增一筆 event 記錄到 buffer。"""
         with self._lock:
             self._mark_tag_seen(record.tag_id)
+            self._update_latest_cache(record.tag_id, "event", record)
             self._event_buffer.append(record)
             if len(self._event_buffer) >= self._batch_size:
                 self._flush_event()
@@ -265,6 +131,7 @@ class DBWriter:
         """新增一筆 metrics 記錄到 buffer。"""
         with self._lock:
             self._mark_tag_seen(record.tag_id)
+            self._update_latest_cache(record.tag_id, "metrics", record)
             self._metric_buffer.append(record)
             if len(self._metric_buffer) >= self._batch_size:
                 self._flush_metrics()
@@ -273,6 +140,7 @@ class DBWriter:
         """新增一筆 measurement 記錄到 buffer。"""
         with self._lock:
             self._mark_tag_seen(record.tag_id)
+            self._update_latest_cache(record.tag_id, "measurement", record)
             self._meas_buffer.append(record)
             if len(self._meas_buffer) >= self._batch_size:
                 self._flush_measurement()
@@ -303,8 +171,51 @@ class DBWriter:
             self._flush_metrics()
             self._flush_measurement()
             self._flush_raw()
+            self._flush_latest_values()
             self._flush_last_data_at()
             self._last_flush = time.monotonic()
+
+    def _flush_latest_values(self):
+        """批次 UPSERT 最新值到 latest_values 表。"""
+        if not self._latest_values_to_upsert:
+            return
+
+        records = list(self._latest_values_to_upsert.values())
+        self._latest_values_to_upsert.clear()
+
+        try:
+            with self._db_pool.connection() as conn:
+                cur = conn.cursor()
+                execute_values(
+                    cur,
+                    """INSERT INTO latest_values 
+                       (tag_id, time, category, display_value, data, quality, run_id, context_data)
+                       VALUES %s
+                       ON CONFLICT (tag_id) DO UPDATE SET
+                           time = EXCLUDED.time,
+                           category = EXCLUDED.category,
+                           display_value = EXCLUDED.display_value,
+                           data = EXCLUDED.data,
+                           quality = EXCLUDED.quality,
+                           run_id = EXCLUDED.run_id,
+                           context_data = EXCLUDED.context_data
+                       WHERE EXCLUDED.time >= latest_values.time""",
+                    [
+                        (
+                            r["tag_id"], r["time"], r["category"], r["display_value"],
+                            Json(r["data"]), r["quality"], r["run_id"],
+                            Json(r["context_data"]) if r["context_data"] is not None else None
+                        )
+                        for r in records
+                    ],
+                    page_size=500,
+                )
+                conn.commit()
+                cur.close()
+                logger.debug("Flushed %d records to latest_values", len(records))
+        except Exception as e:
+            logger.error("Latest values flush failed: %s", e)
+            self._total_errors += 1
 
     def _flush_last_data_at(self):
         """批次更新活躍 Tag 的最後見到時間。"""
@@ -333,35 +244,21 @@ class DBWriter:
         """批次寫入 ts_telemetry。"""
         if not self._telemetry_buffer:
             return
-
         records = self._telemetry_buffer
         self._telemetry_buffer = []
-
         try:
             with self._db_pool.connection() as conn:
                 cur = conn.cursor()
                 execute_values(
                     cur,
                     """INSERT INTO ts_telemetry (time, tag_id, value, quality, run_id, lot_id)
-                       VALUES %s
-                       ON CONFLICT DO NOTHING""",
-                    [
-                        (r.time, r.tag_id, r.value, r.quality, r.run_id, r.lot_id)
-                        for r in records
-                        if r.value is not None
-                    ],
+                       VALUES %s ON CONFLICT DO NOTHING""",
+                    [(r.time, r.tag_id, r.value, r.quality, r.run_id, r.lot_id) for r in records if r.value is not None],
                     page_size=500,
                 )
-
-                text_records = [r for r in records if r.value_text is not None]
-                if text_records:
-                    logger.debug("Skipping %d text records (Phase 1)", len(text_records))
-
                 conn.commit()
                 cur.close()
                 self._total_telemetry_written += len(records)
-                logger.info("Flushed %d telemetry records to ts_telemetry", len(records))
-
         except Exception as e:
             logger.error("Telemetry flush failed: %s", e)
             self._total_errors += 1
@@ -485,29 +382,21 @@ class DBWriter:
         """批次寫入 ts_raw_payloads。"""
         if not self._raw_buffer:
             return
-
         records = self._raw_buffer
         self._raw_buffer = []
-
         try:
             with self._db_pool.connection() as conn:
                 cur = conn.cursor()
                 execute_values(
                     cur,
-                    """INSERT INTO ts_raw_payloads
-                       (time, mqtt_topic, payload, schema_id, payload_size)
+                    """INSERT INTO ts_raw_payloads (time, mqtt_topic, payload, schema_id, payload_size)
                        VALUES %s""",
-                    [
-                        (r.time, r.topic, Json(r.payload), r.schema_id, r.payload_size)
-                        for r in records
-                    ],
+                    [(r.time, r.topic, Json(r.payload), r.schema_id, r.payload_size) for r in records],
                     page_size=500,
                 )
                 conn.commit()
                 cur.close()
                 self._total_raw_written += len(records)
-                logger.debug("Flushed %d raw payload records", len(records))
-
         except Exception as e:
             logger.error("Raw payload flush failed: %s", e)
             self._total_errors += 1
@@ -524,6 +413,7 @@ class DBWriter:
                 "status_buffer": len(self._status_buffer),
                 "alarm_buffer": len(self._alarm_buffer),
                 "event_buffer": len(self._event_buffer),
+                "metric_buffer": len(self._metric_buffer),
                 "meas_buffer": len(self._meas_buffer),
                 "raw_buffer": len(self._raw_buffer),
             }

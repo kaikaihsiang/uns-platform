@@ -16,6 +16,7 @@
 6. [資料持久化規格](#6-資料持久化規格)
 7. [Tag 身份管理與 Live Migration](#7-tag-身份管理與-live-migration)
 8. [資料存取介面](#8-資料存取介面)
+    1. [`latest_values` 快照表規格](#88-latest_values-快照表規格)
 9. [ACL 與安全模型](#9-acl-與安全模型)
 10. [Edge Cases 與設計決策](#10-edge-cases-與設計決策)
 11. [競品分析與差異化定位](#11-競品分析與差異化定位)
@@ -1164,6 +1165,54 @@ EMQX v5 REST API 使用 Bearer Token 認證：
 - **預設排序**：預設以「時間」欄位進行 **降序 (DESC)** 排列（最新優先）。
 - **資訊密度優化**：全局字級 **12px**，JSON 詳情 **10px**。
 - **生產脈絡連結**：所有表格預設顯示 `Lot ID` 與 `Run ID`，確保資料與製程活動高度關聯。
+
+### 8.8 `latest_values` 快照表規格
+
+為了支援高效能的 `GetSnapshot` 查詢，平台維護一張 `latest_values` 快照表，作為全廠設備即時狀態的索引。
+
+#### `latest_values` Schema (第 2 版：JSONB 驅動)
+```sql
+CREATE TABLE latest_values (
+    tag_id          INTEGER PRIMARY KEY REFERENCES tags(tag_id),
+    time            TIMESTAMPTZ NOT NULL,
+    category        TEXT NOT NULL,
+    display_value   TEXT,
+    data            JSONB NOT NULL,
+    quality         TEXT DEFAULT 'good',
+    run_id          INTEGER,
+    metadata        JSONB
+);
+```
+
+**設計考量與專家結論**:
+*   **`data` (JSONB)**: 儲存完整解析後的 Record 物件（如 TelemetryRecord, StatusRecord），確保語義不遺失，方便前端與 AI Agent 直接取用。
+*   **`display_value` (TEXT)**: 預先格式化的易讀字串，供 UI 直接顯示，由 Data Engine 在寫入時生成，以分散 CPU 負載。
+*   **`run_id` (INTEGER)**: 獨立欄位並建立索引。對於 AI Agent 或 MES 查詢「某個批次當下的全廠快照」至關重要，效能遠高於掃描 JSONB。
+*   **`metadata` (JSONB)**: 儲存與該時間點相關的「動態上下文」，例如 SPC 的規格上下限 (USL/LSL)、設備保養狀態、或當前班別等，讓快照成為自包含的決策依據。
+
+#### `display_value` 規格定義
+`display_value` 欄位由 Data Engine 根據 `category` 進行預先格式化。
+
+| Schema Category | `data` 欄位關鍵資訊 | `display_value` 生成邏輯與範例 |
+| :--- | :--- | :--- |
+| **Telemetry** | `value`, `unit` | 將數值格式化到小數點後 2 位，並附上單位。**範例：** `"25.56 °C"` |
+| **Status** | `state`, `sub_state`, `mode` | 組合主/子狀態與模式。**範例：** `"PRD (RUN) - Auto"` 或 `"UDT (E-VAC-LOSS)"` |
+| **Alarm** | `status`, `severity`, `code` | 組合狀態、嚴重性與告警碼。**範例：** `"Active - Critical (E-VAC-001)"` |
+| **Event** | `code`, `result` | 組合事件碼與結果。**範例：** `"LOT_START"` 或 `"RECIPE_DOWNLOAD (Failed)"` |
+| **Metrics** | `code`, `values` | 顯示指標碼與核心 OEE 指標。**範例：** `"OEE (A:92, P:96, Q:99)"` |
+| **Measurement** | `value`, `unit`, `result` | 顯示量測值、單位與判定結果。**範例：** `"12.51 mm (Pass)"` |
+
+#### `metadata` 規格定義 (高價值動態上下文)
+`latest_values.metadata` 欄位的核心價值在於將「時間點的狀態」與「該時間點的『上下文』」綁定，讓每一筆快照都成為一個自包含的、可供決策的資訊單元。Data Engine 應具備從 `Context Cache` 或 `Master Data Cache` 自動填充這些動態元數據的能力。
+
+| Category | 應儲存的 `metadata` (What) | 資訊來源 (Who) | 應用案例 (How) |
+| :--- | :--- | :--- | :--- |
+| **Telemetry** | `{"lsl": 20.0, "usl": 80.0, "target": 50.0}` (規格上下限) | `Context Cache` (來自 MES 的 Recipe 或 Master Data) | **即時 SPC 預警**：AI Agent 一看到 `value` (25.5) 和 `usl` (80.0) 就能判斷是否在規格內，無需二次查詢 MES。 |
+| **Status** | `{"next_state": "RUNNING", "next_mode": "AUTO"}` (預期下個狀態) | `MES/EAP` (透過 Event Payload 提供) | **預測性調度**：上層系統知道設備即將進入生產，可提前準備物料或調度 AGV。 |
+| **Alarm** | `{"acknowledge_by": "user123", "root_cause_suggestion": "Cooling_Fan_Failure"}` | `操作員/AI Agent` (透過 `PublishData` 寫回) | **知識庫積累**：AI 可學習「當 Cooling Fan 轉速下降時，通常會伴隨此告警」，建立因果模型。 |
+| **Event** | `{"source_system": "MES_01", "correlation_id": "uuid-xyz"}` | `外部系統` (發布 Event 時的 Payload) | **跨系統追蹤**：當出現問題時，可憑 `correlation_id` 追蹤從 ERP -> MES -> UNS 的完整數據鏈路。 |
+| **Metrics** | `{"weight": 0.8, "target": 85.0}` (OEE 指標權重與目標) | `Master Data` | **動態 KPI 計算**：營運儀表板可根據不同產線的權重與目標，動態計算加權後的綜合 KPI。 |
+| **Measurement**| `{"instrument_id": "Caliper-04", "inspector": "QA-007"}` (量測儀器/人員) | `檢測設備/人員` (發布時的 Payload) | **量測系統分析 (MSA)**：當發現量測數據異常時，可快速追溯到是哪台儀器或哪位檢驗員，判斷問題根源。 |
 
 ---
 

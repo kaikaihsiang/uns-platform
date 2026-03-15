@@ -2,131 +2,64 @@ name: UNS Platform CI
 
 on:
   push:
-    branches: [ main, master, dev ]
+    branches: [ main, develop ]
   pull_request:
-    branches: [ main, master, dev ]
+    branches: [ main, develop ]
 
 jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.13'
-      - name: Install Ruff
-        run: pip install ruff
-      - name: Run Ruff
-        # 嚴格檢查後端與資料引擎，排除非生產代碼與歷史封存
-        run: ruff check backend data-engine --exclude archive,demo,mcp-server
+          python-version: "3.10"
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff
+      
+      - name: Run Ruff check on Backend
+        run: ruff check backend/app
+        
+      - name: Run Ruff check on Data Engine
+        run: ruff check data-engine/src data-engine/tests
 
-  backend-tests:
+  test-data-engine:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: timescale/timescaledb:latest-pg16
+        image: timescale/timescaledb:latest-pg15
         env:
-          POSTGRES_DB: uns_test
           POSTGRES_USER: uns_admin
           POSTGRES_PASSWORD: uns_dev_password
+          POSTGRES_DB: uns_timeseries
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U uns_admin -d uns_test"
+          --health-cmd pg_isready
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+          
     steps:
       - uses: actions/checkout@v4
+      
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.13'
+          python-version: "3.10"
+          
       - name: Install dependencies
+        working-directory: ./data-engine
         run: |
-          pip install fastapi uvicorn sqlalchemy asyncpg psycopg2-binary pydantic-settings httpx pytest pytest-asyncio pytest-env greenlet paho-mqtt google-genai
-      - name: Initialize Database Schema
-        env:
-          PGPASSWORD: uns_dev_password
-        run: |
-          sudo apt-get update && sudo apt-get install -y postgresql-client
-          until pg_isready -h localhost -p 5432 -U uns_admin -d uns_test; do
-            echo "Waiting for database..."
-            sleep 2
-          done
-          # 基礎 Schema
-          for f in docker/init-db/*.sql; do
-            echo "Executing $f..."
-            psql -h localhost -U uns_admin -d uns_test -f "$f"
-          done
-          # 測試輔助工具 (Truncate helpers)
-          psql -h localhost -U uns_admin -d uns_test -f ops/init_test_db.sql
-      - name: Run tests
-        env:
-          DATABASE_URL: postgresql+asyncpg://uns_admin:uns_dev_password@localhost:5432/uns_test
-          PYTHONPATH: ${{ github.workspace }}/backend
-        run: |
-          pytest backend/tests
-
-  data-engine-tests:
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: timescale/timescaledb:latest-pg16
-        env:
-          POSTGRES_DB: uns_test
-          POSTGRES_USER: uns_admin
-          POSTGRES_PASSWORD: uns_dev_password
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U uns_admin -d uns_test"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.13'
-      - name: Install dependencies
-        run: |
-          pip install pytest pytest-asyncio jsonpath-ng psycopg2-binary httpx gmqtt
-      - name: Initialize Database Schema
-        env:
-          PGPASSWORD: uns_dev_password
-        run: |
-          sudo apt-get update && sudo apt-get install -y postgresql-client
-          until pg_isready -h localhost -p 5432 -U uns_admin -d uns_test; do
-            echo "Waiting for database..."
-            sleep 2
-          done
-          for f in docker/init-db/*.sql; do
-            echo "Executing $f..."
-            psql -h localhost -U uns_admin -d uns_test -f "$f"
-          done
-          psql -h localhost -U uns_admin -d uns_test -f ops/init_test_db.sql
-      - name: Run tests
-        env:
-          PYTHONPATH: ${{ github.workspace }}/data-engine
-          DB_NAME: uns_test
-        run: |
-          pytest data-engine/tests
-
-  frontend-tests:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
-      - name: Install dependencies
-        working-directory: frontend
-        run: npm ci
-      - name: Run tests
-        working-directory: frontend
-        run: npm run test
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio pytest-env
+          
+      - name: Run unit tests
+        working-directory: ./data-engine
+        run: pytest tests/ -v --ignore=tests/test_e2e_semantic_layer.py

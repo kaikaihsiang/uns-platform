@@ -35,6 +35,7 @@
 | `payload_standard_spec.md` | 10 種 Category 的 Payload 標準規格 |
 | `topic_naming_guide.md` | MQTT Topic 命名規範 |
 | `namespace_template.yaml` | ISA-95 Topic Tree 模板 |
+| `semantic_data_layer_manual.md` | **語義資料層操作手冊 (gRPC/REST)** |
 
 ### 資料庫 Schema
 

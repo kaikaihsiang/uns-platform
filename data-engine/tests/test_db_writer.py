@@ -43,6 +43,7 @@ def test_db_writer_batch_trigger(db_writer, mock_db_pool):
         )
 
         assert db_writer.stats["telemetry_buffer"] == 0
+        # Only 1 call: telemetry flush. latest_values is only flushed on tick() or manual flush()
         assert mock_execute_values.call_count == 1
         assert db_writer.stats["telemetry_written"] == 5
 
@@ -64,7 +65,8 @@ def test_db_writer_time_trigger(db_writer, mock_db_pool):
         db_writer.tick()
 
         assert db_writer.stats["telemetry_buffer"] == 0
-        assert mock_execute_values.call_count == 1
+        # Now 2 calls: 1 for telemetry, 1 for latest_values
+        assert mock_execute_values.call_count == 2
 
 
 def test_db_writer_multi_category_flush(db_writer, mock_db_pool):
@@ -86,9 +88,9 @@ def test_db_writer_multi_category_flush(db_writer, mock_db_pool):
 
     with patch("src.db_writer.execute_values") as mock_execute_values:
         db_writer.flush()
-        # 總共 6 種不同表 (status, alarm, event, metrics, meas, raw) + 1 種 (telemetry 已空)
+        # 總共 7 種不同表 (status, alarm, event, metrics, meas, raw, latest_values)
         # 注意：flush() 會呼叫所有 _flush_* 方法
-        assert mock_execute_values.call_count == 6
+        assert mock_execute_values.call_count == 7
         assert db_writer.stats["telemetry_buffer"] == 0
         assert db_writer.stats["raw_written"] == 1
 
@@ -104,7 +106,8 @@ def test_db_writer_error_handling(db_writer, mock_db_pool):
 
         db_writer.flush()
 
-    assert db_writer.stats["errors"] == 2
+    # Now 3 errors: telemetry flush, latest values flush, last_data_at update
+    assert db_writer.stats["errors"] == 3
     # 即使失敗，buffer 也應該清空，避免無限重試卡死 Pipeline
     assert db_writer.stats["telemetry_buffer"] == 0
 

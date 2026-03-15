@@ -334,3 +334,39 @@ class TestPipelineProductionContext:
         # 驗證快取查詢路徑（應為 asset_path）
         mock_cache.get_active_run.assert_called_once()
 
+class TestPipelineContextData:
+    """測試 Pipeline extract_context_data 的邏輯"""
+
+    def test_extract_context_data_telemetry(self):
+        topic = "Ent/Site/Area/Line1/Printer/Telemetry"
+        matcher = _make_matcher(_telemetry_schema(topic))
+        db_writer = MagicMock(spec=DBWriter)
+        
+        pipeline = Pipeline(
+            schema_matcher=matcher,
+            db_writer=db_writer,
+            tag_lookup=TagLookup()
+        )
+        
+        payload = json.dumps({
+            "temperature": 25.0,
+            "_meta": {
+                "usl": 30.0,
+                "lsl": 20.0,
+                "target": 25.0,
+                "extra_ignored": "ignored"
+            }
+        }).encode()
+        
+        pipeline.process(topic, payload)
+        
+        assert db_writer.add_telemetry.call_count == 1
+        record = db_writer.add_telemetry.call_args[0][0]
+        
+        # Should have captured exactly usl, lsl, target
+        assert record.context_data == {
+            "usl": 30.0,
+            "lsl": 20.0,
+            "target": 25.0
+        }
+

@@ -63,7 +63,7 @@ case "$1" in
         ;;
     *)
         show_help
-        exit 
+        exit 1
         ;;
 esac
 

@@ -1,0 +1,81 @@
+syntax = "proto3";
+
+package uns.v1;
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/struct.proto";
+
+// UNS 語義資料服務 (UNS Data Service)
+// 本服務為工業語義網關的核心，外部系統透過此介面實現與 UNS 平台的 SSoT 互動。
+service UNSDataService {
+  // 取得多個語義路徑的當前最新值快照。
+  rpc GetSnapshot(GetSnapshotRequest) returns (GetSnapshotResponse);
+  
+  // 依據時間或生產脈絡，查詢單一或多個路徑的歷史數據。
+  rpc QueryHistory(QueryHistoryRequest) returns (stream SemanticDataPoint);
+  
+  // 依據屬性反查符合條件的語義路徑。
+  rpc SearchNamespace(SearchNamespaceRequest) returns (SearchNamespaceResponse);
+  
+  // 透過語義路徑發布數據至 UNS。
+  rpc PublishData(PublishDataRequest) returns (PublishDataResponse);
+}
+
+// --- Data Contracts ---
+
+// 此定義為 gRPC 與 REST 共用的數據契約 (第 2 版)
+message SemanticDataPoint {
+  string path = 1;                     // 語義路徑 (MQTT Topic)
+  string tag_id = 2;                   // 永久內部 ID
+  google.protobuf.Timestamp ts = 3;   // 最新時間戳
+  string category = 4;                 // 資料類別 (telemetry, status, ...)
+  string display_value = 5;            // 預先格式化的易讀值
+  google.protobuf.Struct data = 6;     // 結構化的完整資料
+  map<string, string> context_data = 7; // 動態上下文元數據 (原 metadata)
+  string current_run_id = 8;           // 當前生產批次 ID
+}
+
+
+// --- RPC Messages ---
+
+message GetSnapshotRequest {
+  repeated string paths = 1; // 支援萬用字元 (e.g., "Site/Area/Line/**")
+}
+
+message GetSnapshotResponse {
+  repeated SemanticDataPoint points = 1;
+}
+
+message QueryHistoryRequest {
+  repeated string paths = 1;
+  google.protobuf.Timestamp start_time = 2;
+  google.protobuf.Timestamp end_time = 3;
+  string run_id = 4; // 可選，若提供則優先使用
+  int32 limit = 5;
+}
+
+message SearchNamespaceRequest {
+  string base_path = 1; // 限定搜尋的根路徑
+  map<string, string> attributes = 2; // e.g., {"unit": "degC", "vendor": "Siemens"}
+}
+
+message SearchNamespaceResponse {
+  message NodeMatch {
+    string path = 1;
+    string tag_id = 2;
+    map<string, string> attributes = 3;
+  }
+  repeated NodeMatch matches = 1;
+}
+
+message PublishDataRequest {
+  string path = 1;
+  google.protobuf.Struct data = 2; // 使用 Struct 來傳遞完整的 JSON-like 物件
+  google.protobuf.Timestamp ts = 3;
+}
+
+message PublishDataResponse {
+  bool success = 1;
+  string message = 2;
+  string tag_id = 3;
+}
