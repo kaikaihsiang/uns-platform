@@ -4,6 +4,7 @@ Data Transfer Objects (DTOs) for the Data Engine Pipeline.
 from datetime import datetime
 from typing import Optional
 
+
 class TelemetryRecord:
     """ts_telemetry 寫入記錄。"""
     __slots__ = ("time", "tag_id", "value", "value_text", "value_json", "quality", "run_id", "lot_id", "context_data")

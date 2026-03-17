@@ -8,7 +8,6 @@ Batch INSERT to ts_telemetry + ts_raw_payloads (Dual Storage)。
 import logging
 import threading
 import time
-from datetime import datetime
 
 from psycopg2.extras import Json, execute_values
 

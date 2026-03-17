@@ -128,7 +128,7 @@ CREATE TABLE IF NOT EXISTS latest_values (
     data            JSONB NOT NULL,
     quality         TEXT DEFAULT 'good',
     run_id          INTEGER,
-    metadata        JSONB
+    context_data    JSONB
 );
 
 CREATE INDEX IF NOT EXISTS idx_lv_run_id ON latest_values(run_id) WHERE run_id IS NOT NULL;

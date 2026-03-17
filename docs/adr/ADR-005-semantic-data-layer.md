@@ -40,7 +40,7 @@ UNS 作為工廠的 Single Source of Truth (SSoT)，必須提供介面讓外部�
 
 | 優先序 | 類別 | 情議 | 商業價值 | 實作策略 |
 | :--- | :--- | :--- | :--- | :--- |
-| **P0** | A, E | **多節點最新狀態快照 (Snapshot)** | 極高 (看版剛需) | 支援 Wildcard 的高速查詢介面，整合 `metadata`。 |
+| **P0** | A, E | **多節點最新狀態快照 (Snapshot)** | 極高 (看版剛需) | 支援 Wildcard 的高速查詢介面，整合 `context_data`。 |
 | **P0** | B, E | **脈絡導向歷史查詢 (History)** | 極高 (AI/RCA 剛需) | 整合 `run_id` 與時間窗 (Time Range)，提供統一歷史出口。 |
 | **P1** | C | **語義與元數據搜尋 (Search)** | 高 (降低整合成本) | 透過屬性 (Attributes/Tags) 反查 Node 結構。 |
 | **P1** | D | **語義數據寫回 (PublishData)** | 高 (完成閉環分析) | 支援透過「語義路徑」寫入，自動映射底層標籤。 |
@@ -75,7 +75,7 @@ message SemanticDataPoint {
   string unit = 6;                 
 
   // 擴展元數據 (支撐 Measurement/Metric 特定屬性)
-  map<string, string> metadata = 7; 
+  map<string, string> context_data = 7; 
   string current_run_id = 8;
 }
 ```
@@ -106,7 +106,7 @@ CREATE TABLE latest_values (
     data            JSONB NOT NULL,
     quality         TEXT DEFAULT 'good',
     run_id          INTEGER,
-    metadata        JSONB
+    context_data    JSONB
 );
 ```
 
@@ -114,7 +114,7 @@ CREATE TABLE latest_values (
 *   **`data` (JSONB)**: 核心改動。儲存完整解析後的 Record 物件，確保語義不遺失。
 *   **`display_value` (TEXT)**: 預先格式化的易讀字串，供 UI 直接顯示，由 Data Engine 在寫入時生成。
 *   **`run_id` (INTEGER)**: 獨立欄位並建立索引，用於高速過濾特定生產批次的設備快照。
-*   **`metadata` (JSONB)**: 儲存與該時間點相關的動態上下文，如 SPC 上下限。
+*   **`context_data` (JSONB)**: 儲存與該時間點相關的動態上下文，如 SPC 上下限。
 
 ### 3. 語義搜尋的資料來源 (擴充 `tags.metadata`)
 *   **原定設計**：`SearchNamespace` 透過屬性反查路徑（例如：搜尋特定供應商的設備）。
@@ -135,10 +135,10 @@ CREATE TABLE latest_values (
 
 | **Measurement** | `value`, `unit`, `result` | 顯示量測值、單位與判定結果。**範例：** `"12.51 mm (Pass)"` |
 
-### 5. `metadata` 規格定義 (高價值動態上下文)
-`latest_values.metadata` 欄位的核心價值在於將「時間點的狀態」與「該時間點的『上下文』」綁定，讓每一筆快照都成為一個自包含的、可供決策的資訊單元。
+### 5. `context_data` 規格定義 (高價值動態上下文)
+`latest_values.context_data` 欄位的核心價值在於將「時間點的狀態」與「該時間點的『上下文』」綁定，讓每一筆快照都成為一個自包含的、可供決策的資訊單元。
 
-| Category | 應儲存的 `metadata` (What) | 資訊來源 (Who) | 應用案例 (How) |
+| Category | 應儲存的 `context_data` (What) | 資訊來源 (Who) | 應用案例 (How) |
 | :--- | :--- | :--- | :--- |
 | **Telemetry** | `{"lsl": 20.0, "usl": 80.0, "target": 50.0}` (規格上下限) | `Context Cache` (來自 MES 的 Recipe 或 Master Data) | **即時 SPC 預警**：AI Agent 一看到 `value` (25.5) 和 `usl` (80.0) 就能判斷是否在規格內，無需二次查詢 MES。 |
 | **Status** | `{"next_state": "RUNNING", "next_mode": "AUTO"}` (預期下個狀態) | `MES/EAP` (透過 Event Payload 提供) | **預測性調度**：上層系統知道設備即將進入生產，可提前準備物料或調度 AGV。 |

@@ -457,7 +457,7 @@ class TagAdmin:
 
         logger.info(f"批次改名：將影響 {len(affected)} 個 tag")
 
-        for mapping_id, tag_id, old_topic in affected:
+        for _mapping_id, _tag_id, old_topic in affected:
             new_topic = old_topic.replace(old_prefix, new_prefix, 1)
             self.remap_topic(old_topic, new_topic, reason=reason, changed_by=changed_by)
 

@@ -3,7 +3,6 @@ This script seeds the database with a realistic ISA-95 hierarchy and schema bind
 for the Taiwan Precision demo.
 """
 import asyncio
-import httpx
 
 # (This is a simplified version for recovery. In a real scenario, it would be more complex)
 

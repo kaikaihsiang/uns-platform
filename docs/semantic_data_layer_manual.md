@@ -41,7 +41,7 @@ UNS 語義資料層（Semantic Data Layer）是本平台的工業語義網關。
         "value": "STANDBY",
         "semantic_label": "equipment_state",
         "unit": "--",
-        "metadata": {},
+        "context_data": {},
         "run_id": "8"
       }
     ]

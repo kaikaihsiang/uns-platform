@@ -1203,7 +1203,7 @@ CREATE TABLE latest_values (
 | **Measurement** | `value`, `unit`, `result` | 顯示量測值、單位與判定結果。**範例：** `"12.51 mm (Pass)"` |
 
 #### `metadata` 規格定義 (高價值動態上下文)
-`latest_values.metadata` 欄位的核心價值在於將「時間點的狀態」與「該時間點的『上下文』」綁定，讓每一筆快照都成為一個自包含的、可供決策的資訊單元。Data Engine 應具備從 `Context Cache` 或 `Master Data Cache` 自動填充這些動態元數據的能力。
+`latest_values.context_data` 欄位的核心價值在於將「時間點的狀態」與「該時間點的『上下文』」綁定，讓每一筆快照都成為一個自包含的、可供決策的資訊單元。Data Engine 應具備從 `Context Cache` 或 `Master Data Cache` 自動填充這些動態元數據的能力。
 
 | Category | 應儲存的 `metadata` (What) | 資訊來源 (Who) | 應用案例 (How) |
 | :--- | :--- | :--- | :--- |

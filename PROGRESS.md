@@ -52,11 +52,11 @@
 | F12: Robustness Data Bag | ✅ DONE | gemini-cli | 2026-03-11 | 實作「單一溢位出口」機制與 Payload Schema 命名重構，確保動態欄位不遺失且不干擾 Context |
 | F13: Tag Activity Heartbeat | ✅ DONE | gemini-cli | 2026-03-12 | 實作 `tags.last_data_at` 的高效批次更新機制，降低資料庫 UPDATE 負擔並確保活躍度準確 |
 | F14: Synchronized RCA Timeline | ✅ DONE | gemini-cli | 2026-03-12 | 實作「全維度同步 RCA 視圖」，整合遙測、狀態、警報與事件於單一時間軸，解決視覺錯位並提升診斷效率 |
-| **🚀 Feature 5: Semantic Data Layer** | ✅ DONE | **gemini-cli** | 2026-03-15 | **ADR-005** 實作完成：建立工業語義網關 (gRPC/REST)，包含 `latest_values` JSONB 架構與 `metadata` 規格定義 |
+| **🚀 Feature 5: Semantic Data Layer** | ✅ DONE | **gemini-cli** | 2026-03-15 | **ADR-005** 實作完成：建立工業語義網關 (gRPC/REST)，包含 `latest_values` JSONB 架構與 `context_data` 規格定義 |
 | - 5.1.1: 定義 `.proto` 規範與多型數據結構 | ✅ DONE | | | |
 | - 5.1.2: Backend gRPC Server 環境建置 | ✅ DONE | | | |
 | - 5.1.3: 實作語義反查與 `latest_values` 緩存表 | ✅ DONE | | | |
-| - 5.1.4: 定義 `latest_values.metadata` 規格與應用方法 | ✅ DONE | industrial-domain-expert | 2026-03-15 | 詳見 ADR-005 與 Platform System Spec |
+| - 5.1.4: 定義 `latest_values.context_data` 規格與應用方法 | ✅ DONE | industrial-domain-expert | 2026-03-15 | 詳見 ADR-005 與 Platform System Spec |
 | - 5.2.1: 介面實作 - `GetSnapshot` (多路徑快照) | ✅ DONE | | | |
 | - 5.2.2: 介面實作 - `QueryHistory` (脈絡歷史查詢) | 🔨 佔位 | | | (目前為 Placeholder) |
 | - 5.2.3: 介面實作 - `SearchNamespace` (語義搜尋) | ✅ DONE | | | |
