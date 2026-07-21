@@ -224,7 +224,10 @@ IoT 資料自動關聯到 Lot / Step / Recipe
 
 ## 產品 Roadmap
 
-### Phase 1：PoC（核心驗證）
+> 最後對齊實際進度：2026-07-21（開發於 2026-03-17 中斷約 4 個月後重新盤點，
+> 逐項對照 PROGRESS.md 與程式碼實際狀態校正，而非只看 commit 訊息宣稱）。
+
+### Phase 1：PoC（核心驗證）— ✅ 全數完成
 
 ```
 範圍：
@@ -236,21 +239,23 @@ IoT 資料自動關聯到 Lot / Step / Recipe
   ✅ Per-topic persistence config
   ✅ Tag 身份分離 + Migration 驗證
 
-目標：展示核心差異化，可以 demo 給客戶看
+目標：展示核心差異化，可以 demo 給客戶看 — 已達成
 ```
 
-### Phase 2：MVP
+### Phase 2：MVP — 大部分完成，1 項未動 + 1 項未完工
 
 ```
 新增：
-  ◻ ACL 管理 UI + EMQX 同步
-  ◻ gRPC 查詢 API
-  ◻ Production Context Layer
-  ◻ Measurement 寫入 + SPC 查詢
-  ◻ Equipment State + OEE 計算
-  ◻ Retention Policy 自動執行
+  ◻ ACL 管理 UI + EMQX 同步            — 未開始（PoC 階段 Mock Auth 決策延後，見下方 ADR）
+  🔨 gRPC 查詢 API（語義資料層 ADR-005） — 部分完成：GetSnapshot/PublishData/SearchNamespace(gRPC) 已完成，
+                                          QueryHistory 仍是 placeholder，SearchNamespace REST 入口未接 attributes，
+                                          semantic E2E test 未納入 CI（重啟開發後第一優先項目）
+  ✅ Production Context Layer          — 完成（自動附加 run_id/lot_id）
+  ✅ Measurement 寫入 + SPC 查詢        — 完成（Data Category 路由含 measurement 類別）
+  ✅ Equipment State + OEE 計算         — 完成（ts_status + Synchronized RCA Timeline + oee_tool.py）
+  ◻ Retention Policy 自動執行           — 未完成：`PUT /api/v1/system/retention` 仍回 501 stub
 
-目標：可以在 pilot 客戶部署的最小產品
+目標：可以在 pilot 客戶部署的最小產品 — 尚未達成，卡在語義層收尾與 ACL/Retention 兩項未動工的功能
 ```
 
 ### Phase 3：Production
@@ -261,7 +266,7 @@ IoT 資料自動關聯到 Lot / Step / Recipe
   ◻ Multi-site 支援
   ◻ Audit Log + 合規報表
   ◻ Grafana 整合（出廠 dashboard）
-  ◻ Docker Compose 一鍵部署
+  ✅ Docker Compose 一鍵部署            — 提前達成（docker-compose.yml + ops/start_all.sh）
   ◻ 文件 + 教學影片
 
 目標：可賣給客戶的完整產品

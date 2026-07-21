@@ -53,3 +53,22 @@ logs/
 # Generated gRPC
 *_pb2.py
 *_pb2_grpc.py
+
+# AI agent working memory / internal collaboration scaffolding
+# (repo is public — keep only project deliverables, not the process artifacts
+# used to coordinate multiple AI agents across sessions)
+.scratch/
+_memory/
+_progress/
+.claude/
+AGENTS.md
+CLAUDE.md
+archive/
+docs/handover/
+docs/mvp_task_delegation.md
+docs/backend_agent_handover.md
+docs/qa_e2e_validation_plan.md
+docs/feature_4_testing_plan.md
+docs/data_category_robustness_report.md
+Implementation Plan
+Metadata Trigger Spec

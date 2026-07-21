@@ -52,24 +52,29 @@
 | F12: Robustness Data Bag | ✅ DONE | gemini-cli | 2026-03-11 | 實作「單一溢位出口」機制與 Payload Schema 命名重構，確保動態欄位不遺失且不干擾 Context |
 | F13: Tag Activity Heartbeat | ✅ DONE | gemini-cli | 2026-03-12 | 實作 `tags.last_data_at` 的高效批次更新機制，降低資料庫 UPDATE 負擔並確保活躍度準確 |
 | F14: Synchronized RCA Timeline | ✅ DONE | gemini-cli | 2026-03-12 | 實作「全維度同步 RCA 視圖」，整合遙測、狀態、警報與事件於單一時間軸，解決視覺錯位並提升診斷效率 |
-| **🚀 Feature 5: Semantic Data Layer** | ✅ DONE | **gemini-cli** | 2026-03-15 | **ADR-005** 實作完成：建立工業語義網關 (gRPC/REST)，包含 `latest_values` JSONB 架構與 `context_data` 規格定義 |
+| **🚀 Feature 5: Semantic Data Layer** | 🔨 部分完成 | **gemini-cli** | 2026-03-15 | **ADR-005** 部分完成：工業語義網關 (gRPC/REST) 骨架與 `latest_values` JSONB 架構已建立，但 `QueryHistory`/`SearchNamespace` REST 尚未完工，見下方 2026-03-18 會診結論 |
 | - 5.1.1: 定義 `.proto` 規範與多型數據結構 | ✅ DONE | | | |
 | - 5.1.2: Backend gRPC Server 環境建置 | ✅ DONE | | | |
 | - 5.1.3: 實作語義反查與 `latest_values` 緩存表 | ✅ DONE | | | |
 | - 5.1.4: 定義 `latest_values.context_data` 規格與應用方法 | ✅ DONE | industrial-domain-expert | 2026-03-15 | 詳見 ADR-005 與 Platform System Spec |
 | - 5.2.1: 介面實作 - `GetSnapshot` (多路徑快照) | ✅ DONE | | | |
-| - 5.2.2: 介面實作 - `QueryHistory` (脈絡歷史查詢) | 🔨 佔位 | | | (目前為 Placeholder) |
-| - 5.2.3: 介面實作 - `SearchNamespace` (語義搜尋) | ✅ DONE | | | |
+| - 5.2.2: 介面實作 - `QueryHistory` (脈絡歷史查詢) | 🔨 佔位 | | | `semantic_service.py` 目前仍回傳 `NOT_IMPLEMENTED`（2026-07-21 重新查證，狀態未變） |
+| - 5.2.3: 介面實作 - `SearchNamespace` (語義搜尋) | 🔨 部分完成 | | | gRPC 邏輯有，但 REST 入口尚未真正接收 attributes 參數 |
 | - 5.2.4: 介面實作 - `PublishData` (語義化回寫) | ✅ DONE | | | |
 | - 5.3.1: 擴展 MCP Tools (AI 語義工具包) | ⬜ TODO | | | |
 | F5 (Phase 2): Data Engine Test Arsenal | ✅ DONE | data-engine-engineer | 2026-03-06 | 實作 `reset_db.sh`、`seed_namespace.sh` (TaiwanPrecision) 與智慧工廠模擬器 (`start_sim.sh`) |
-| F6 (Phase 2): Semantic Layer E2E Test | ✅ DONE | data-engine-engineer | 2026-03-15 | 建立 `test_e2e_semantic_layer.py` 並整合至 `run_test.sh semantic-e2e` |
+| F6 (Phase 2): Semantic Layer E2E Test | 🔨 部分完成 | data-engine-engineer | 2026-03-15 | `test_e2e_semantic_layer.py` 已建立，但尚未整合進 `demo/run_test.sh` 與 `.github/workflows/ci.yml`（未納入常規 CI） |
 
 ## 🔴 Blockers / Decisions Needed
 
 <!-- 任何 Agent 遇到需要跨對話討論的問題，記在這裡 -->
 
-_（目前無）_
+- 2026-03-18 會診結論（Domain + Backend + Data Engine）：**ADR-005 進度宣告需校正**。
+  - `QueryHistory` 仍為 placeholder，`backend/app/services/semantic_service.py` 目前只回 `NOT_IMPLEMENTED`。
+  - `SearchNamespace` 的 REST 入口尚未真正接收 attributes，完成度低於 `✅ DONE` 宣告。
+  - `demo/run_test.sh` 與 `.github/workflows/ci.yml` 尚未納入 `test_e2e_semantic_layer.py`，與 F6 (Phase 2) 的完成敘述有落差。
+  - 建議：將 ADR-005 主狀態調整為「部分完成 / QueryHistory 未完」，或優先補齊 QueryHistory、REST Search 與 semantic E2E 納管後再維持 DONE 宣告。
+  - **狀態更新 [2026-07-21]**：above 表格已依此建議校正為「🔨 部分完成」。開發於此 blocker 未解時中斷（最後 commit 2026-03-17），2026-07-21 重新盤點確認 `QueryHistory` 狀態沒有變化。**這是重啟開發後第一個要處理的項目**：補完 QueryHistory / REST SearchNamespace / semantic E2E CI 三項，才能讓 Feature 5 回到 DONE。
 
 ### Architecture Decision Records (ADR) Reference
 
